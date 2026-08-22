@@ -21,14 +21,8 @@ const api = {
   lockVault: (): Promise<void> => ipcRenderer.invoke('vault:lock'),
   saveEntries: (entries: CredentialEntry[]): Promise<void> =>
     ipcRenderer.invoke('vault:save', entries),
-  hasRecoveryKey: (): Promise<boolean> => ipcRenderer.invoke('vault:hasRecovery'),
-  setupRecoveryKey: (): Promise<{ ok: boolean; recoveryCode?: string; error?: string }> =>
-    ipcRenderer.invoke('vault:setupRecovery'),
-  resetWithRecoveryKey: (
-    recoveryCode: string,
-    newPassword: string
-  ): Promise<UnlockResult> =>
-    ipcRenderer.invoke('vault:resetWithRecovery', recoveryCode, newPassword),
+  resetVaultPassword: (newPassword: string): Promise<UnlockResult> =>
+    ipcRenderer.invoke('vault:resetPassword', newPassword),
   copyToClipboard: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
 
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
@@ -51,6 +45,12 @@ const api = {
   submitVpnOtp: (requestId: string, otp: string): void => {
     ipcRenderer.send('vpn:otp-submit', { requestId, otp })
   },
+
+  requestOtp: (): Promise<{ ok: boolean; expiry?: number; error?: string }> =>
+    ipcRenderer.invoke('otp:request'),
+  verifyOtp: (enteredOtp: string): Promise<{ valid: boolean }> =>
+    ipcRenderer.invoke('otp:verify', enteredOtp),
+  hasPendingOtp: (): Promise<boolean> => ipcRenderer.invoke('otp:hasPending'),
 
   launchDb: (request: DbLaunchRequest): Promise<DbLaunchResult> =>
     ipcRenderer.invoke('db:launch', request),

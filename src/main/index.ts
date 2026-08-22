@@ -5,6 +5,7 @@ import * as vault from './vault'
 import * as settings from './settings'
 import * as vpn from './vpn'
 import * as dbLaunch from './dbLaunch'
+import * as otp from './otp'
 import type { AppSettings, CredentialEntry, DbLaunchRequest, VpnConnectRequest, VpnType, VpnOtpRequest } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
@@ -57,8 +58,8 @@ function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('vault:create', async (_event, password: string) => {
-    const { entries, recoveryCode } = await vault.createVault(password)
-    return { ok: true, entries, recoveryCode }
+    const { entries } = await vault.createVault(password)
+    return { ok: true, entries }
   })
 
   ipcMain.handle('vault:unlock', async (_event, password: string) => {
@@ -74,22 +75,9 @@ function registerIpcHandlers(): void {
     vault.lock()
   })
 
-  ipcMain.handle('vault:hasRecovery', async () => {
-    return vault.hasRecoveryKey()
-  })
-
-  ipcMain.handle('vault:setupRecovery', async () => {
+  ipcMain.handle('vault:resetPassword', async (_event, newPassword: string) => {
     try {
-      const recoveryCode = await vault.setupRecoveryKey()
-      return { ok: true as const, recoveryCode }
-    } catch (err) {
-      return { ok: false as const, error: err instanceof Error ? err.message : 'Failed to set up recovery key' }
-    }
-  })
-
-  ipcMain.handle('vault:resetWithRecovery', async (_event, recoveryCode: string, newPassword: string) => {
-    try {
-      const entries = await vault.resetWithRecoveryKey(recoveryCode, newPassword)
+      const entries = await vault.resetVaultPassword(newPassword)
       return { ok: true as const, entries }
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : 'Reset failed' }
@@ -164,6 +152,27 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('shell:openUrl', async (_event, url: string) => {
     await shell.openExternal(url)
+  })
+
+  ipcMain.handle('otp:request', async () => {
+    try {
+      const appSettings = await settings.getSettings()
+      if (!appSettings.userEmail) throw new Error('No user email configured. Please set your email in Settings first.')
+      if (!appSettings.smtpHost || !appSettings.smtpUser) throw new Error('SMTP is not configured. Please set up email in Settings first.')
+      const result = await otp.requestOtp(appSettings, appSettings.userEmail)
+      return { ok: true as const, ...result }
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : 'Failed to send OTP email' }
+    }
+  })
+
+  ipcMain.handle('otp:verify', async (_event, enteredOtp: string) => {
+    const valid = await otp.verifyOtp(enteredOtp)
+    return { valid }
+  })
+
+  ipcMain.handle('otp:hasPending', async () => {
+    return otp.hasPendingOtp()
   })
 }
 

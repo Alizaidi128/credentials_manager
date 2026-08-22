@@ -44,7 +44,7 @@ export function Sidebar({
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder="Search apps…"
-            className="w-full rounded-lg border border-border bg-surface py-2 pl-8 pr-3 text-sm text-slate-800 outline-none ring-brand-500/40 transition focus:ring-2 dark:border-border-dark dark:bg-surface-dark dark:text-white"
+            className="w-full rounded-lg border border-border bg-surface py-2 pl-8 pr-3 text-sm text-slate-800 outline-none ring-brand-500/40 transition placeholder:text-slate-500 focus:ring-2 dark:border-border-dark dark:bg-surface-dark dark:text-white dark:placeholder:text-slate-400"
           />
         </div>
       </div>
@@ -90,13 +90,20 @@ export function Sidebar({
                 >
                   {entry.appName || 'Untitled'}
                 </p>
-                <p className="truncate text-xs text-slate-400 dark:text-slate-500">
+                <p className="truncate text-xs text-slate-500 dark:text-slate-400">
                   {entry.appUrl || entry.vpnHost || 'No URL set'}
                 </p>
               </div>
             </button>
           )
         })}
+      </div>
+
+      <div className="no-drag border-t border-border px-4 py-1.5 text-center dark:border-border-dark">
+        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+          Powered by{' '}
+          <span className="font-semibold text-brand-500 dark:text-brand-400">Ali Zaidi</span>
+        </p>
       </div>
 
       <div className="no-drag flex items-center gap-2 border-t border-border p-3 dark:border-border-dark">

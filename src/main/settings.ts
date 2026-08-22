@@ -8,7 +8,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   sangforClientPath: 'C:\\Program Files (x86)\\Sangfor\\SSL\\EasyConnect\\EasyConnect.exe',
   sangforSettleMs: 10000,
   fortiClientPath: 'C:\\Program Files\\Fortinet\\FortiClient\\FortiClient.exe',
-  checkpointPath: 'C:\\Program Files (x86)\\CheckPoint\\Endpoint Connect\\trac.exe'
+  checkpointPath: 'C:\\Program Files (x86)\\CheckPoint\\Endpoint Connect\\trac.exe',
+  smtpHost: 'smtp.office365.com',
+  smtpPort: 587,
+  smtpUser: '',
+  smtpPass: '',
+  smtpFrom: 'Vaultier <noreply@centegytechnologies.com>',
+  userEmail: ''
 }
 
 function settingsPath(): string {

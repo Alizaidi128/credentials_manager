@@ -48,20 +48,23 @@ export interface CredentialEntry {
 export interface UnlockResult {
   ok: boolean
   entries?: CredentialEntry[]
-  recoveryCode?: string // present only on vault:create
   error?: string
 }
 
 export interface AppSettings {
   vpnCliPath: string
   sangforClientPath: string
-  // Extra time (ms) to wait after EasyConnect's window is ready before sending
-  // keystrokes. EasyConnect fetches its login page over the network after the
-  // window opens; how long this takes depends on your VPN server's response time.
-  // Increase this if keystrokes still land before the login form appears.
   sangforSettleMs: number
   fortiClientPath: string
   checkpointPath: string
+  // SMTP — shared configuration for sending recovery/OTP emails
+  smtpHost: string
+  smtpPort: number
+  smtpUser: string
+  smtpPass: string
+  smtpFrom: string
+  // Per-user email — OTP and recovery key emails are sent here
+  userEmail: string
 }
 
 export interface VpnOtpRequest {
