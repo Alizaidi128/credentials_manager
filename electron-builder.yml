@@ -39,8 +39,8 @@ nsis:
 # Uncomment and fill in your GitHub username/repo when you're ready to publish.
 # The first `npm run release` will create a GitHub Release and upload the installer.
 #
-# publish:
-#   provider: github
-#   owner: your-github-username
-#   repo: vaultier
-#   releaseType: release
+publish:
+  provider: github
+  owner: Alizaidi128
+  repo: credentials_manager
+  releaseType: release
