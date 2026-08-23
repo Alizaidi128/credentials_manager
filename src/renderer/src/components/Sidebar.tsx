@@ -1,5 +1,5 @@
 import type { CredentialEntry } from '@shared/types'
-import { GlobeIcon, LockIcon, PlusIcon, SearchIcon, SettingsIcon } from './icons'
+import { DownloadIcon, GlobeIcon, LockIcon, PlusIcon, SearchIcon, SettingsIcon, UploadIcon } from './icons'
 import { ThemeToggle } from './ThemeToggle'
 
 interface SidebarProps {
@@ -12,6 +12,9 @@ interface SidebarProps {
   onAdd: () => void
   onLock: () => void
   onSettings: () => void
+  onTogglePin: (id: string) => void
+  onExport: () => void
+  onImport: () => void
 }
 
 export function Sidebar({
@@ -23,7 +26,10 @@ export function Sidebar({
   onSelect,
   onAdd,
   onLock,
-  onSettings
+  onSettings,
+  onTogglePin,
+  onExport,
+  onImport
 }: SidebarProps): JSX.Element {
   return (
     <aside className="drag-region flex h-full w-72 shrink-0 flex-col border-r border-border bg-panel/70 dark:border-border-dark dark:bg-panel-dark/70">
@@ -63,38 +69,52 @@ export function Sidebar({
         {filteredEntries.map((entry) => {
           const active = entry.id === selectedId
           return (
-            <button
+            <div
               key={entry.id}
-              type="button"
-              onClick={() => onSelect(entry.id)}
-              className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all ${
+              className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-all ${
                 active
                   ? 'bg-white shadow-card dark:bg-slate-800 dark:shadow-card-dark'
                   : 'hover:bg-white/70 dark:hover:bg-slate-800/50'
               }`}
             >
-              <div
-                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold ${
-                  active
-                    ? 'bg-gradient-to-br from-brand-500 to-brand-700 text-white'
-                    : 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-300'
-                }`}
+              <button
+                type="button"
+                onClick={() => onSelect(entry.id)}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left"
               >
-                {entry.appName.trim().charAt(0).toUpperCase() || <GlobeIcon className="h-4 w-4" />}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p
-                  className={`truncate text-sm font-medium ${
-                    active ? 'text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-200'
+                <div
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold ${
+                    active
+                      ? 'bg-gradient-to-br from-brand-500 to-brand-700 text-white'
+                      : 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-300'
                   }`}
                 >
-                  {entry.appName || 'Untitled'}
-                </p>
-                <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                  {entry.appUrl || entry.vpnHost || 'No URL set'}
-                </p>
-              </div>
-            </button>
+                  {entry.appName.trim().charAt(0).toUpperCase() || <GlobeIcon className="h-4 w-4" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`truncate text-sm font-medium ${
+                      active ? 'text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-200'
+                    }`}
+                  >
+                    {entry.appName || 'Untitled'}
+                  </p>
+                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                    {entry.apps[0]?.url || entry.vpnHost || 'No URL set'}
+                  </p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onTogglePin(entry.id) }}
+                title={entry.pinned ? 'Unpin' : 'Pin to top'}
+                className={`shrink-0 opacity-0 transition group-hover:opacity-100 ${entry.pinned ? '!opacity-100' : ''}`}
+              >
+                <svg viewBox="0 0 16 16" className={`h-3.5 w-3.5 ${entry.pinned ? 'fill-amber-400 text-amber-400' : 'fill-none text-slate-400 hover:text-amber-400'}`} stroke="currentColor" strokeWidth="1.5">
+                  <path d="M8 1.5l1.8 3.6 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4L2.2 5.7l4-.6z" />
+                </svg>
+              </button>
+            </div>
           )
         })}
       </div>
@@ -106,7 +126,30 @@ export function Sidebar({
         </p>
       </div>
 
-      <div className="no-drag flex items-center gap-2 border-t border-border p-3 dark:border-border-dark">
+      {/* Import / Export row */}
+      <div className="no-drag flex items-center gap-1.5 border-t border-border px-3 pt-2 dark:border-border-dark">
+        <button
+          type="button"
+          onClick={onImport}
+          title="Import from file"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border py-1.5 text-xs font-medium text-slate-500 transition hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600 dark:border-border-dark dark:text-slate-400 dark:hover:border-brand-500 dark:hover:bg-brand-900/20 dark:hover:text-brand-400"
+        >
+          <UploadIcon className="h-3.5 w-3.5" />
+          Import
+        </button>
+        <button
+          type="button"
+          onClick={onExport}
+          title="Export to file or email"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border py-1.5 text-xs font-medium text-slate-500 transition hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600 dark:border-border-dark dark:text-slate-400 dark:hover:border-brand-500 dark:hover:bg-brand-900/20 dark:hover:text-brand-400"
+        >
+          <DownloadIcon className="h-3.5 w-3.5" />
+          Export
+        </button>
+      </div>
+
+      {/* Main action row */}
+      <div className="no-drag flex items-center gap-2 border-border p-3 dark:border-border-dark">
         <button
           type="button"
           onClick={onAdd}

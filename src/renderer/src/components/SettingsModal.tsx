@@ -115,6 +115,34 @@ export function SettingsModal({ onClose }: SettingsModalProps): JSX.Element {
             <p className="text-sm text-slate-400 dark:text-slate-500">Loading…</p>
           )}
 
+          {/* Idle auto-lock */}
+          {settings && (
+            <div className="mt-6 border-t border-border pt-5 dark:border-border-dark">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
+                Security
+              </p>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Auto-lock after idle
+                </label>
+                <select
+                  value={settings.idleTimeoutMinutes}
+                  onChange={(e) => setSettings({ ...settings, idleTimeoutMinutes: Number(e.target.value) })}
+                  className="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-slate-900 outline-none ring-brand-500/40 transition focus:ring-2 dark:border-border-dark dark:bg-panel-dark dark:text-white"
+                >
+                  <option value={0}>Unlimited (never lock)</option>
+                  <option value={5}>5 minutes</option>
+                  <option value={10}>10 minutes</option>
+                  <option value={15}>15 minutes</option>
+                  <option value={30}>30 minutes</option>
+                </select>
+                <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                  The vault locks automatically after this period of inactivity.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Password Reset — OTP email */}
           {settings && (
             <div className="mt-6 border-t border-border pt-5 dark:border-border-dark">

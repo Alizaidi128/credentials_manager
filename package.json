@@ -1,17 +1,22 @@
 {
   "name": "credentials-manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Offline, locally-encrypted credential manager",
   "main": "./out/main/index.js",
-  "author": "you",
+  "author": "Ali Zaidi",
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "gen-icon": "node scripts/gen-icon.mjs",
+    "dist": "node scripts/gen-icon.mjs && npm run build && electron-builder --win",
+    "dist:dir": "node scripts/gen-icon.mjs && npm run build && electron-builder --win --dir",
+    "release": "node scripts/gen-icon.mjs && npm run build && electron-builder --win --publish=always"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "nodemailer": "^9.0.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -23,6 +28,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "electron": "^33.2.1",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",

@@ -1,0 +1,27 @@
+VAULTIER — END-USER LICENSE AGREEMENT
+======================================
+Powered by Ali Zaidi
+
+This software ("Vaultier") is provided for personal and professional use.
+
+1. GRANT OF LICENSE
+   You are granted a non-exclusive, non-transferable license to install and
+   use Vaultier on devices you own or control.
+
+2. YOUR DATA
+   All credentials are stored locally on your machine, encrypted with
+   AES-256-GCM. Neither Ali Zaidi nor any third party has access to your
+   vault data.
+
+3. RESTRICTIONS
+   You may not reverse-engineer, decompile, or redistribute this software
+   without written permission from the author.
+
+4. NO WARRANTY
+   This software is provided "as is" without warranty of any kind. The
+   author is not liable for any loss of data or damages arising from its use.
+
+5. CONTACT
+   For support or inquiries, contact the developer.
+
+By clicking "I Agree" you accept these terms.

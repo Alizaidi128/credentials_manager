@@ -126,6 +126,7 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
     }
     setLaunchingDb(true)
     const result = await window.api.launchDb({
+      dbClient: entry.dbClient,
       commandTemplate: entry.dbCommandTemplate,
       openInTerminal: entry.dbOpenInTerminal,
       vars: {
@@ -222,7 +223,8 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
         </div>
       )}
 
-      <div key={entry.id} className="mx-auto h-full max-w-2xl animate-slide-in-right overflow-y-auto px-8 py-8">
+      <div key={entry.id} className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-2xl animate-slide-in-right px-8 py-8">
         <div className="mb-6 flex items-start justify-between">
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-xl font-semibold text-white shadow-lg shadow-brand-600/20">
@@ -394,6 +396,7 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
             </p>
           </section>
         </div>
+      </div>
       </div>
     </>
   )

@@ -14,7 +14,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   smtpUser: '',
   smtpPass: '',
   smtpFrom: 'Vaultier <noreply@centegytechnologies.com>',
-  userEmail: ''
+  userEmail: '',
+  idleTimeoutMinutes: 0
 }
 
 function settingsPath(): string {

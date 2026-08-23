@@ -21,6 +21,7 @@ export interface AppEntry {
 export interface CredentialEntry {
   id: string
   appName: string
+  pinned?: boolean
 
   vpnType: VpnType
   vpnHost: string
@@ -65,6 +66,34 @@ export interface AppSettings {
   smtpFrom: string
   // Per-user email — OTP and recovery key emails are sent here
   userEmail: string
+  // 0 = unlimited (never lock on idle)
+  idleTimeoutMinutes: number
+}
+
+export interface VaultierExportFile {
+  _vaultier: true
+  version: string
+  exportedAt: string
+  exportedBy?: string
+  entries: CredentialEntry[]
+}
+
+export interface ImportOpenResult {
+  ok: boolean
+  entries?: CredentialEntry[]
+  exportedAt?: string
+  exportedBy?: string
+  error?: string
+}
+
+export interface ExportShareResult {
+  ok: boolean
+  error?: string
+}
+
+export interface ExportDownloadResult {
+  ok: boolean
+  error?: string
 }
 
 export interface VpnOtpRequest {
@@ -91,6 +120,7 @@ export interface VpnLogEvent {
 }
 
 export interface DbLaunchRequest {
+  dbClient: DbClientType
   commandTemplate: string
   openInTerminal: boolean
   vars: {

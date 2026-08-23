@@ -66,7 +66,7 @@ const DB_CLIENT_LABELS: Record<DbClientType, string> = {
 }
 
 const DB_DEFAULT_TEMPLATES: Record<DbClientType, string> = {
-  toad: '"C:\\Program Files\\Quest Software\\Toad for Oracle 13.3\\Toad.exe" {username}/{password}@//{host}:{port}/{database}',
+  toad: '"C:\\Program Files\\Quest Software\\Toad for Oracle 13.3\\Toad.exe"',
   dbeaver:
     'dbeaver -con "driver=oracle|host={host}|port={port}|database={database}|user={username}|password={password}|savePassword=true|connect=true"',
   ssms: 'ssms -S {host}\\{instance} -d {database} -U {username} -P {password}',
@@ -415,18 +415,35 @@ export function EntryModal({ initial, onCancel, onSave }: EntryModalProps): JSX.
               />
             </div>
             <div className="sm:col-span-2">
-              <label className={labelClass()}>Launch Command</label>
+              <label className={labelClass()}>
+                {form.dbClient === 'toad' ? 'Toad Executable Path' : 'Launch Command'}
+              </label>
               <textarea
                 value={form.dbCommandTemplate}
                 onChange={(e) => update('dbCommandTemplate', e.target.value)}
                 rows={2}
-                placeholder='e.g. sqlplus {username}/{password}@{host}:{port}/{database}'
+                placeholder={
+                  form.dbClient === 'toad'
+                    ? '"C:\\Program Files\\Quest Software\\Toad for Oracle 13.3\\Toad.exe"'
+                    : 'e.g. sqlplus {username}/{password}@{host}:{port}/{database}'
+                }
                 className={`${inputClass('font-mono')} resize-none`}
               />
-              <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
-                Uses {'{host} {port} {database} {instance} {username} {password}'} placeholders. Edit
-                to match the exact CLI syntax of your installed client/version.
-              </p>
+              {form.dbClient === 'toad' ? (
+                <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                  Path to Toad.exe only — the connection is built automatically using the DB fields above.
+                  For new connections to open in the same Toad window, enable{' '}
+                  <span className="font-medium text-slate-500 dark:text-slate-300">
+                    Tools → Options → Appearance → Allow only one application instance
+                  </span>{' '}
+                  in Toad.
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                  Uses {'{host} {port} {database} {instance} {username} {password}'} placeholders. Edit
+                  to match the exact CLI syntax of your installed client/version.
+                </p>
+              )}
             </div>
           </Section>
 

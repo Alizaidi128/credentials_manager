@@ -4,6 +4,9 @@ import type {
   CredentialEntry,
   DbLaunchRequest,
   DbLaunchResult,
+  ExportDownloadResult,
+  ExportShareResult,
+  ImportOpenResult,
   UnlockResult,
   VpnConnectRequest,
   VpnConnectResult,
@@ -54,7 +57,32 @@ const api = {
 
   launchDb: (request: DbLaunchRequest): Promise<DbLaunchResult> =>
     ipcRenderer.invoke('db:launch', request),
-  openUrl: (url: string): Promise<void> => ipcRenderer.invoke('shell:openUrl', url)
+  openUrl: (url: string): Promise<void> => ipcRenderer.invoke('shell:openUrl', url),
+
+  onForceLock: (callback: () => void): (() => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on('vault:force-lock', listener)
+    return () => ipcRenderer.removeListener('vault:force-lock', listener)
+  },
+
+  exportDownload: (entries: CredentialEntry[], exportedBy?: string): Promise<ExportDownloadResult> =>
+    ipcRenderer.invoke('export:download', entries, exportedBy),
+  exportShare: (entries: CredentialEntry[], recipientEmail: string, exportedBy?: string): Promise<ExportShareResult> =>
+    ipcRenderer.invoke('export:share', entries, recipientEmail, exportedBy),
+  importOpen: (): Promise<ImportOpenResult> =>
+    ipcRenderer.invoke('import:open'),
+
+  onUpdateAvailable: (callback: (info: { version: string }) => void): (() => void) => {
+    const listener = (_event: unknown, data: { version: string }): void => callback(data)
+    ipcRenderer.on('update:available', listener)
+    return () => ipcRenderer.removeListener('update:available', listener)
+  },
+  onUpdateDownloaded: (callback: (info: { version: string }) => void): (() => void) => {
+    const listener = (_event: unknown, data: { version: string }): void => callback(data)
+    ipcRenderer.on('update:downloaded', listener)
+    return () => ipcRenderer.removeListener('update:downloaded', listener)
+  },
+  installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install')
 }
 
 contextBridge.exposeInMainWorld('api', api)

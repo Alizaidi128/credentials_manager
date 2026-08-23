@@ -1,0 +1,46 @@
+appId: com.alizaidi.vaultier
+productName: Vaultier
+copyright: "Powered by Ali Zaidi. All rights reserved."
+
+# Source of bundled files (electron-vite output)
+directories:
+  buildResources: resources
+  output: release
+
+files:
+  - out/**/*
+
+# Pack into asar archive (faster load, hides source)
+asar: true
+
+# ── Windows ───────────────────────────────────────────────────────────────────
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico          # 256×256 ICO — place this file to brand the installer
+
+# ── NSIS wizard installer ─────────────────────────────────────────────────────
+nsis:
+  oneClick: false                          # Show multi-page wizard (not silent one-click)
+  perMachine: false                        # Install per-user by default (no admin required)
+  allowElevation: true                     # Offer "Install for all users" option
+  allowToChangeInstallationDirectory: true # User can choose install folder
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Vaultier
+  menuCategory: Vaultier                   # Start-menu subfolder
+  deleteAppDataOnUninstall: false          # Keep vault data on uninstall (user's choice)
+  license: resources/license.txt          # Shown on the License page of the wizard
+  include: resources/installer.nsh        # Kills running Vaultier before file copy
+
+# ── Auto-update via GitHub Releases ──────────────────────────────────────────
+# Uncomment and fill in your GitHub username/repo when you're ready to publish.
+# The first `npm run release` will create a GitHub Release and upload the installer.
+#
+# publish:
+#   provider: github
+#   owner: your-github-username
+#   repo: vaultier
+#   releaseType: release

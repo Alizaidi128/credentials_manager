@@ -1,60 +1,77 @@
 # Vaultier
 
-An offline, locally-encrypted credential manager for people who juggle
-VPN + app + database credentials per project. Instead of just storing
-secrets, each entry can **launch your actual tools** — connect the VPN,
-open the app in your browser, and start your DB client already logged
-in — from one click.
+An offline, locally-encrypted credential manager for people who juggle VPN + app + database credentials per project. Instead of just storing secrets, each entry can **launch your actual tools** — connect the VPN, open the app in your browser, and start your DB client already logged in — from one click.
 
-Everything is stored in a single encrypted file on your machine
-(`vault.dat` in the app's user-data folder). Nothing is sent over the
-network; the app never talks to anything except the VPN client and DB
-client processes it launches for you.
+Everything is stored in a single encrypted file on your machine (`vault.dat` in the app's user-data folder). Nothing is sent over the network except OTP emails you explicitly trigger; the app never talks to anything except the VPN client and DB client processes it launches for you.
+
+---
 
 ## Features
 
-- **Master-password vault** — AES-256-GCM encryption, key derived with
-  scrypt. The master password is never stored; forgetting it means the
-  vault cannot be recovered.
-- **One entry per "thing you connect to"** — app, VPN, and database
-  credentials live together on a single card instead of three separate
-  password entries.
-- **One-click VPN connect** — automates the Cisco AnyConnect CLI
-  (`vpncli.exe`): feeds it your host/username/password, watches the
-  live output, and tells you when the tunnel is up.
-- **One-click app open** — opens the entry's URL in your default
-  browser (after the VPN connects, if one is configured).
-- **One-click DB client launch** — spawns your DB tool (Toad, DBeaver,
-  SSMS, sqlcmd, sqlplus, mysql, psql, or any custom command) with the
-  host/port/database/instance/username/password already filled in.
-- **Copy-to-clipboard fields** — every credential field can be revealed
-  and copied individually, for tools that don't support automated
-  launch.
-- **Search, edit, delete** entries; light/dark theme.
+### Vault & Security
+- **AES-256-GCM encryption** with scrypt key derivation — your master password never leaves memory and is never stored anywhere
+- **Vault lock / unlock** — lock manually via the sidebar lock icon, or the vault locks automatically when the window closes
+- **Master password reset via OTP** — if you forget your master password, request a one-time code sent to your configured email address; enter it to set a new password without losing any vault entries
+- **Internal recovery key** — a device-bound recovery key is automatically generated at vault creation and stored using the OS-level `safeStorage` API (Windows DPAPI); it is never visible to the user and is used transparently during password reset to decrypt and re-encrypt the vault
+
+### Credential Entries
+- **One entry per "thing you connect to"** — VPN, app, and database credentials live together on a single card
+- **Multiple apps per entry** — each entry supports multiple app URLs with individual usernames and passwords
+- **Copy-to-clipboard with reveal/hide toggle** on every credential field — username, password, VPN credentials, DB credentials
+- **Notes field** — free-text per entry (ticket links, gotchas, config notes)
+- **Search** — filter entries in the sidebar by name
+- **Edit and delete** entries with confirmation dialog
+
+### VPN Automation
+- **Cisco AnyConnect** — launches `vpncli.exe connect <host>`, feeds username/password, accepts banner prompts, and reports live output in a log panel
+- **Sangfor EasyConnect** — opens the EasyConnect GUI and sends keystrokes to fill in host/username/password automatically; configurable settle time to account for slow-loading login forms
+- **Fortinet FortiClient** — automates CLI tunnel connect/disconnect by tunnel name
+- **Check Point Endpoint Security** — automates `trac.exe` connect/disconnect with 2FA/OTP support; when the VPN process requests an OTP, a prompt appears in the app and the value is fed back to the process
+- **Disconnect VPN** button per VPN type — tears down the active tunnel cleanly
+- **Live VPN log panel** — real-time output stream while the VPN process runs
+
+### Database Launch
+- **Supported DB clients**: Toad, DBeaver, SSMS, `sqlcmd`, SQL*Plus, MySQL CLI, psql, or any custom command
+- **Template command system** — `{host}`, `{port}`, `{database}`, `{instance}`, `{username}`, `{password}` placeholders are substituted at launch time; a sensible default command is pre-filled when you pick a client (only if the field is empty)
+- **Terminal vs GUI mode** — tick *Open in terminal window* for interactive CLI tools; leave it unticked for GUI apps
+
+### Settings
+- **Per-tool executable paths** — configure the full path to `vpncli.exe`, `EasyConnect.exe`, `FortiClient.exe`, and `trac.exe` globally in Settings, so per-entry forms stay clean
+- **EasyConnect settle time** — global wait (ms) before keystrokes are sent to the EasyConnect window
+- **Password Reset email** — set your personal email address in Settings; this is where OTP codes are delivered when you use the forgot-password flow
+- **SMTP configuration** — host, port, username, password, and from-address for the outgoing email account used to send OTP codes
+
+### UI / UX
+- **Light and dark theme** — system-aware by default, with a toggle in the sidebar header and on the unlock screen
+- **"Powered by Ali Zaidi"** signature in the sidebar footer
+- **Scrollable settings modal** — sticky header and footer with Save/Close buttons always accessible regardless of content length
+
+---
 
 ## Running the app
 
-```
+```bash
 npm install
 npm run dev        # launches the app in development mode
 ```
 
 Other scripts:
 
-```
+```bash
 npm run build       # production build
-npm run start        # preview the production build
-npm run typecheck    # type-check main + renderer
+npm run start       # preview the production build
+npm run typecheck   # type-check main + renderer
 ```
+
+---
 
 ## First run
 
-1. On first launch you'll be asked to **create a master password**
-   (min 8 characters). This encrypts the vault — there is no password
-   reset, so store it somewhere safe.
+1. On first launch you'll be asked to **create a master password** (min 8 characters). This encrypts the vault.
 2. On every later launch you'll **unlock** with that same password.
-3. Use the **lock icon** in the sidebar at any time to re-lock the
-   vault (also happens automatically when the window closes).
+3. Use the **lock icon** in the sidebar at any time to re-lock the vault (also happens automatically when the window closes).
+
+---
 
 ## Adding an entry
 
@@ -63,19 +80,15 @@ Click **Add Entry** in the sidebar. The form has four sections:
 | Section | What it's for |
 |---|---|
 | **App Name** | Required. Shown in the sidebar list. |
-| **VPN** | Set *VPN Type* to "Cisco AnyConnect" if this app needs a VPN tunnel first, then fill in VPN Host / Username / Password. Leave it on "No VPN required" to skip this step entirely. |
-| **Application** | The app's URL and login credentials. |
-| **Database** | DB Client, Host, Port, Database, Instance, Username, Password, and the **Launch Command** used to open your DB tool (see below). |
+| **VPN** | Set *VPN Type* to one of the supported clients if this entry needs a VPN tunnel first, then fill in host / username / password. Leave it on "No VPN required" to skip. |
+| **Applications** | One or more app URLs with individual username/password pairs. |
+| **Database** | DB client, host, port, database, instance, username, password, launch command, and terminal mode. |
 
-Notes field at the bottom is free text (e.g. ticket links, gotchas).
+The **Notes** field at the bottom is free text.
 
 ### The DB launch command
 
-When you pick a **DB Client** from the dropdown, a starter command is
-filled in automatically (only if the command box is still empty, so it
-never overwrites something you already customized). The command is a
-plain string with placeholders that get substituted with your entry's
-values when you click **Connect Database**:
+When you pick a **DB Client** from the dropdown, a starter command is filled in automatically (only if the field is still empty, so it never overwrites your customisations). Placeholders:
 
 ```
 {host}  {port}  {database}  {instance}  {username}  {password}
@@ -86,82 +99,85 @@ Example — Oracle via SQL*Plus:
 sqlplus {username}/{password}@{host}:{port}/{database}
 ```
 
-Example — SQL Server Management Studio, using a named instance:
+Example — SQL Server Management Studio with a named instance:
 ```
 ssms -S {host}\{instance} -d {database} -U {username} -P {password}
 ```
 
-**These are starting points, not guarantees.** The exact command-line
-flags a tool accepts depend on which version you have installed and
-how it's configured (Toad in particular has no universal CLI
-"auto-login" switch across versions). Edit the Launch Command field
-until it matches what actually works when you run it yourself in a
-terminal — after that, the app will run the same thing for you on
-each click.
+Tick **Open in terminal window** for CLI tools (sqlplus, sqlcmd, mysql, psql) so you get an interactive session. Leave it unticked for GUI tools (Toad, DBeaver, SSMS).
 
-Tick **Open in terminal window** for CLI tools (sqlplus, sqlcmd,
-mysql, psql) so you get an interactive session in a console window.
-Leave it unticked for GUI tools (Toad, DBeaver, SSMS) so it just
-launches the app.
+---
 
-## Using an entry — the button-click workflows
+## Using an entry — quick actions
 
-Select an entry in the sidebar to see its detail view. At the top is
-a **Quick Actions** panel with the buttons that do the automation:
+Select an entry in the sidebar to see its detail view. The **Quick Actions** panel at the top has two buttons:
 
-### "Connect VPN & Open App" (or just "Open App" if no VPN is set)
-1. If the entry has a VPN configured, the app launches
-   `vpncli.exe connect <host>` and automatically types your username,
-   password, and accepts any banner/agreement prompt as they appear.
-2. A **VPN log** panel appears so you can watch exactly what the
-   Cisco client is saying in real time — useful the first time you set
-   up an entry, in case your installed CLI version prompts slightly
-   differently than expected.
-3. Once connected, the app URL opens in your default browser
-   automatically.
-4. If nothing needs a VPN, clicking the button just opens the URL.
-
-Use **Disconnect VPN** next to it to tear the tunnel down when you're
-done — it runs `vpncli.exe disconnect`.
+### "Connect VPN & Open App" (or "Open App" if no VPN is set)
+1. If the entry has a VPN configured, the app launches the appropriate VPN client and feeds it your credentials.
+2. A **live log panel** appears so you can watch output in real time.
+3. Once connected, the entry's app URL opens in your default browser.
+4. For Check Point tunnels that require 2FA, an OTP input prompt appears in the app.
 
 ### "Connect Database"
-Runs the entry's **Launch Command** with all placeholders substituted,
-either as a background GUI launch or inside a new terminal window
-(per the "Open in terminal window" setting). A status line under the
-buttons tells you if it launched successfully or what went wrong
-(e.g. "command not found" usually means the exe isn't on your PATH —
-use the full quoted path instead, like the Toad example in the form).
+Runs the entry's launch command with all placeholders substituted, either as a GUI launch or inside a new terminal window. A status line reports success or error.
 
 ### Copying credentials manually
-Every field in the VPN / Application / Database sections has its own
-copy button (and a reveal/hide toggle for secrets), for the times you
-just need to paste a value into a prompt the automation doesn't cover.
+Every field in the VPN / Application / Database sections has its own copy button and a reveal/hide toggle — for times when you just need to paste into a prompt the automation doesn't cover.
+
+---
+
+## Password reset (forgot master password)
+
+If you forget your master password:
+
+1. On the unlock screen, click **Forgot password?**
+2. Click **Send OTP to my email** — a 6-digit one-time code is emailed to the address configured in Settings (valid for 30 minutes).
+3. Enter the code in the app.
+4. Set a new master password.
+
+Your vault entries are fully preserved — only the encryption password changes. The email includes the machine name and request time so you can identify unexpected reset attempts.
+
+> **Prerequisite:** you must have set your email address and SMTP credentials in Settings **before** forgetting your password. The vault must also have been created with the current version of the app (so the internal recovery key file exists).
+
+---
 
 ## Settings
 
-Click the **gear icon** in the sidebar to set the path to your
-`vpncli.exe` (defaults to the standard Cisco AnyConnect install
-location on Windows). This is the only global setting — everything
-else lives per-entry.
+Click the **gear icon** in the sidebar. Settings are grouped by function:
+
+| Setting | Purpose |
+|---|---|
+| Cisco AnyConnect CLI Path | Full path to `vpncli.exe` |
+| Sangfor EasyConnect Path | Full path to `EasyConnect.exe` |
+| EasyConnect Login Settle Time (ms) | Wait after window loads before sending keystrokes (default 10 000 ms) |
+| Fortinet FortiClient Path | Full path to `FortiClient.exe` |
+| Check Point Endpoint Security Path | Full path to `trac.exe` |
+| Your Email Address | Where OTP codes are sent for password reset |
+| SMTP Configuration | Host, port, username, password, from-address for sending OTP emails |
+
+---
 
 ## Where your data lives
 
-- Vault: `<user-data>/vault.dat` — encrypted, unreadable without your
-  master password.
-- Settings: `<user-data>/settings.json` — just the VPN CLI path, not
-  encrypted (contains no secrets).
+| File | Contents | Encrypted? |
+|---|---|---|
+| `vault.dat` | All credential entries | Yes — AES-256-GCM, master password required |
+| `vault-rk.bin` | Internal recovery key | Yes — OS `safeStorage` (DPAPI on Windows) |
+| `settings.json` | Tool paths, SMTP config, user email | No (contains SMTP password — protect accordingly) |
+| `otp-request.json` | Pending OTP hash + expiry | No (hash only — the raw code is never stored) |
 
-On Windows, `<user-data>` is typically
-`%APPDATA%\credentials-manager`.
+On Windows, all files are in `%APPDATA%\credentials-manager`.
+
+---
 
 ## Security notes
 
-- The master password is held in memory only for the unlocked session
-  and is wiped on lock/close.
-- VPN and DB passwords are written to the target process's stdin or
-  argv/environment only at the moment you click a launch button —
-  they are not logged anywhere the app controls. Be aware some CLI
-  tools (e.g. mysql's `-p<password>`) put the password directly on
-  the command line, which can be visible to other processes on the
-  same machine while the command runs — this is inherent to that
-  tool's CLI, not something Vaultier adds.
+- The master password is held in memory only for the unlocked session and wiped on lock/close.
+- The internal recovery key is stored via the OS `safeStorage` API and is tied to the current OS user session — it cannot be read by another user account or copied to another machine.
+- VPN and DB passwords are written to the target process's stdin or argv only at the moment you click a launch button — they are not logged anywhere the app controls.
+- Be aware that some CLI tools (e.g. `mysql -p<password>`) put the password on the command line, which can be visible to other processes on the same machine while the command runs — this is inherent to that tool's CLI, not something Vaultier adds.
+- SMTP credentials are stored unencrypted in `settings.json`. Use a dedicated app-password or relay account rather than your primary email password.
+
+---
+
+*Powered by Ali Zaidi*
