@@ -1,10 +1,9 @@
 ; Custom NSIS hooks for Vaultier installer
 ; Included automatically via electron-builder.yml → nsis.include
 
-!macro customInit
-  ; Kill any running Vaultier instance before files are written.
-  ; customInit runs before file extraction, preventing "cannot be closed" errors.
-  DetailPrint "Closing Vaultier if it is running..."
+!macro preInit
+  ; Kill any running Vaultier instance before the installer does anything.
+  ; Runs in .onInit — earliest possible point, before file extraction.
   nsExec::ExecToLog 'taskkill /F /IM "Vaultier.exe" /T'
-  Sleep 2000
+  Sleep 3000
 !macroend
