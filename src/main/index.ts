@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, clipboard, Tray, Menu, nativeImage } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain, clipboard, Tray, Menu, nativeImage } from 'electron'
 import { deflateSync } from 'zlib'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
@@ -372,6 +372,7 @@ app.whenReady().then(() => {
     autoUpdater.on('error', (err) => {
       console.error('Auto-updater error:', err.message)
       mainWindow?.webContents.send('update:error', { message: err.message })
+      dialog.showErrorBox('Update check failed', err.message)
     })
 
     // Wait for renderer to be ready before first check, then every 4 hours
