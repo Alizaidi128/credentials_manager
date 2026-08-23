@@ -3,6 +3,7 @@ import { XIcon } from './icons'
 
 interface Props {
   version: string
+  downloading?: boolean
   onInstallNow: () => void
   onDismiss: () => void
   onRemindIn: (ms: number) => void
@@ -15,7 +16,7 @@ const REMIND_OPTIONS = [
   { label: 'Tomorrow', ms: 24 * 60 * 60 * 1000 }
 ]
 
-export function UpdateBanner({ version, onInstallNow, onDismiss, onRemindIn }: Props): JSX.Element {
+export function UpdateBanner({ version, downloading, onInstallNow, onDismiss, onRemindIn }: Props): JSX.Element {
   const [showRemind, setShowRemind] = useState(false)
 
   return (
@@ -32,53 +33,57 @@ export function UpdateBanner({ version, onInstallNow, onDismiss, onRemindIn }: P
           <span className="font-semibold text-brand-600 dark:text-brand-400">
             Vaultier {version}
           </span>{' '}
-          is ready to install
+          {downloading ? 'is downloading…' : 'is ready to install'}
         </p>
 
         {/* Actions */}
         <div className="relative flex items-center gap-1.5">
-          {/* Remind me dropdown */}
-          {showRemind ? (
-            <div className="absolute bottom-full right-0 mb-2 w-44 overflow-hidden rounded-xl border border-border bg-white shadow-xl dark:border-border-dark dark:bg-slate-800">
-              <p className="border-b border-border px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:border-border-dark dark:text-slate-500">
-                Remind me in…
-              </p>
-              {REMIND_OPTIONS.map((opt) => (
-                <button
-                  key={opt.ms}
-                  type="button"
-                  onClick={() => { setShowRemind(false); onRemindIn(opt.ms) }}
-                  className="block w-full px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
+          {!downloading && (
+            <>
+              {/* Remind me dropdown */}
+              {showRemind && (
+                <div className="absolute bottom-full right-0 mb-2 w-44 overflow-hidden rounded-xl border border-border bg-white shadow-xl dark:border-border-dark dark:bg-slate-800">
+                  <p className="border-b border-border px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:border-border-dark dark:text-slate-500">
+                    Remind me in…
+                  </p>
+                  {REMIND_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.ms}
+                      type="button"
+                      onClick={() => { setShowRemind(false); onRemindIn(opt.ms) }}
+                      className="block w-full px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-200/60 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-          >
-            Later
-          </button>
+              <button
+                type="button"
+                onClick={onDismiss}
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-200/60 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+              >
+                Later
+              </button>
 
-          <button
-            type="button"
-            onClick={() => setShowRemind((v) => !v)}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-200/60 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-          >
-            Remind me…
-          </button>
+              <button
+                type="button"
+                onClick={() => setShowRemind((v) => !v)}
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-200/60 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+              >
+                Remind me…
+              </button>
 
-          <button
-            type="button"
-            onClick={onInstallNow}
-            className="rounded-lg bg-brand-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm shadow-brand-600/30 transition hover:bg-brand-600"
-          >
-            Install Now
-          </button>
+              <button
+                type="button"
+                onClick={onInstallNow}
+                className="rounded-lg bg-brand-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm shadow-brand-600/30 transition hover:bg-brand-600"
+              >
+                Install Now
+              </button>
+            </>
+          )}
 
           <button
             type="button"

@@ -429,16 +429,7 @@ export function EntryModal({ initial, onCancel, onSave }: EntryModalProps): JSX.
                 }
                 className={`${inputClass('font-mono')} resize-none`}
               />
-              {form.dbClient === 'toad' ? (
-                <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
-                  Path to Toad.exe only — the connection is built automatically using the DB fields above.
-                  For new connections to open in the same Toad window, enable{' '}
-                  <span className="font-medium text-slate-500 dark:text-slate-300">
-                    Tools → Options → Appearance → Allow only one application instance
-                  </span>{' '}
-                  in Toad.
-                </p>
-              ) : (
+              {form.dbClient !== 'toad' && (
                 <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
                   Uses {'{host} {port} {database} {instance} {username} {password}'} placeholders. Edit
                   to match the exact CLI syntax of your installed client/version.

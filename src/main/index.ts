@@ -371,11 +371,14 @@ app.whenReady().then(() => {
 
     autoUpdater.on('error', (err) => {
       console.error('Auto-updater error:', err.message)
+      mainWindow?.webContents.send('update:error', { message: err.message })
     })
 
-    // Check on startup, then every 4 hours
-    autoUpdater.checkForUpdates()
-    setInterval(() => autoUpdater.checkForUpdates(), 4 * 60 * 60 * 1000)
+    // Wait for renderer to be ready before first check, then every 4 hours
+    mainWindow?.webContents.once('did-finish-load', () => {
+      setTimeout(() => autoUpdater.checkForUpdates(), 3000)
+      setInterval(() => autoUpdater.checkForUpdates(), 4 * 60 * 60 * 1000)
+    })
   }
 })
 

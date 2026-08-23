@@ -31,7 +31,7 @@ function App(): JSX.Element {
     exportedBy?: string
   } | null>(null)
   const [idleTimeoutMs, setIdleTimeoutMs] = useState(0)
-  const [pendingUpdate, setPendingUpdate] = useState<{ version: string } | null>(null)
+  const [pendingUpdate, setPendingUpdate] = useState<{ version: string; downloading?: boolean } | null>(null)
   const remindTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Stable ref so idle timer always calls the latest handleLock
@@ -101,10 +101,13 @@ function App(): JSX.Element {
 
   // Listen for auto-updater events
   useEffect(() => {
-    const unsubDownloaded = window.api.onUpdateDownloaded((info) => {
-      setPendingUpdate(info)
+    const unsubAvailable = window.api.onUpdateAvailable((info) => {
+      setPendingUpdate({ ...info, downloading: true })
     })
-    return unsubDownloaded
+    const unsubDownloaded = window.api.onUpdateDownloaded((info) => {
+      setPendingUpdate({ ...info, downloading: false })
+    })
+    return () => { unsubAvailable(); unsubDownloaded() }
   }, [])
 
   function handleInstallNow(): void {
@@ -206,6 +209,7 @@ function App(): JSX.Element {
         {pendingUpdate && (
           <UpdateBanner
             version={pendingUpdate.version}
+            downloading={pendingUpdate.downloading}
             onInstallNow={handleInstallNow}
             onDismiss={() => setPendingUpdate(null)}
             onRemindIn={handleRemindIn}

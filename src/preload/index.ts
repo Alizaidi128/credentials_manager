@@ -82,6 +82,11 @@ const api = {
     ipcRenderer.on('update:downloaded', listener)
     return () => ipcRenderer.removeListener('update:downloaded', listener)
   },
+  onUpdateError: (callback: (info: { message: string }) => void): (() => void) => {
+    const listener = (_event: unknown, data: { message: string }): void => callback(data)
+    ipcRenderer.on('update:error', listener)
+    return () => ipcRenderer.removeListener('update:error', listener)
+  },
   installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install')
 }
 
