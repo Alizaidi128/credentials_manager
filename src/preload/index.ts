@@ -91,7 +91,8 @@ const api = {
     ipcRenderer.on('update:error', listener)
     return () => ipcRenderer.removeListener('update:error', listener)
   },
-  installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install')
+  installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install'),
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:version')
 }
 
 contextBridge.exposeInMainWorld('api', api)

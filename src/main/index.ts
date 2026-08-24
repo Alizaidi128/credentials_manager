@@ -265,6 +265,8 @@ function registerIpcHandlers(): void {
         }
         return vpn.connectCheckpoint(appSettings.checkpointPath, request, onLog, onOtpRequired)
       }
+      case 'openconnect':
+        return vpn.connectOpenConnect(appSettings.openconnectPath, request, onLog)
       default:
         return { ok: false, message: `Unsupported VPN type: ${request.vpnType}` }
     }
@@ -281,6 +283,8 @@ function registerIpcHandlers(): void {
         return vpn.disconnectFortiClient(appSettings.fortiClientPath)
       case 'checkpoint':
         return vpn.disconnectCheckpoint(appSettings.checkpointPath)
+      case 'openconnect':
+        return vpn.disconnectOpenConnect()
       default:
         return { ok: false, message: `Unsupported VPN type: ${vpnType}` }
     }
@@ -294,6 +298,8 @@ function registerIpcHandlers(): void {
     const appSettings = await settings.getSettings()
     return serverLaunch.launchServer(appSettings.winscpPath, request)
   })
+
+  ipcMain.handle('app:version', () => app.getVersion())
 
   ipcMain.handle('shell:openUrl', async (_event, url: string) => {
     await shell.openExternal(url)

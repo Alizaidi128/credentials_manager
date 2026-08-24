@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   fortiClientPath: 'C:\\Program Files\\Fortinet\\FortiClient\\FortiClient.exe',
   checkpointPath: 'C:\\Program Files (x86)\\CheckPoint\\Endpoint Connect\\trac.exe',
   winscpPath: 'C:\\Program Files (x86)\\WinSCP\\WinSCP.exe',
+  openconnectPath: 'C:\\Program Files\\OpenConnect-GUI\\openconnect.exe',
   smtpHost: 'smtp.office365.com',
   smtpPort: 587,
   smtpUser: '',

@@ -1,4 +1,4 @@
-export type VpnType = 'none' | 'cisco-anyconnect' | 'sangfor' | 'forti-client' | 'checkpoint'
+export type VpnType = 'none' | 'cisco-anyconnect' | 'sangfor' | 'forti-client' | 'checkpoint' | 'openconnect'
 
 export type ServerType = 'none' | 'winscp' | 'rdp'
 
@@ -27,6 +27,7 @@ export interface CredentialEntry {
 
   vpnType: VpnType
   vpnHost: string
+  vpnPort: string
   vpnUsername: string
   vpnPassword: string
   vpnPreSharedKey: string
@@ -76,6 +77,7 @@ export interface AppSettings {
   // Per-user email — OTP and recovery key emails are sent here
   userEmail: string
   winscpPath: string
+  openconnectPath: string
   // 0 = unlimited (never lock on idle)
   idleTimeoutMinutes: number
 }
@@ -115,6 +117,7 @@ export interface VpnConnectRequest {
   requestId: string
   vpnType: VpnType
   host: string
+  port: string
   username: string
   password: string
 }

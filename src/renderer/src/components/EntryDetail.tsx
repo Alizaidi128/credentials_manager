@@ -85,6 +85,7 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
         requestId,
         vpnType: entry.vpnType,
         host: entry.vpnHost,
+        port: entry.vpnPort ?? '',
         username: entry.vpnUsername,
         password: entry.vpnPassword
       })

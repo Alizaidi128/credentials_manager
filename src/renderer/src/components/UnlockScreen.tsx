@@ -12,6 +12,7 @@ type Mode = 'unlock' | 'otp'
 export function UnlockScreen({ onUnlocked }: UnlockScreenProps): JSX.Element {
   const [checking, setChecking] = useState(true)
   const [vaultExists, setVaultExists] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
   const [mode, setMode] = useState<Mode>('unlock')
 
   // Unlock / create
@@ -38,6 +39,7 @@ export function UnlockScreen({ onUnlocked }: UnlockScreenProps): JSX.Element {
       setVaultExists(exists)
       setChecking(false)
     })
+    window.api.getAppVersion().then(setAppVersion)
   }, [])
 
   // Countdown timer for OTP expiry
@@ -363,9 +365,14 @@ export function UnlockScreen({ onUnlocked }: UnlockScreenProps): JSX.Element {
           </form>
         )}
 
-        <p className="mt-6 text-center text-[11px] leading-relaxed text-slate-400 dark:text-slate-600">
-          Everything stays on this device. Your vault is encrypted with AES-256-GCM and never leaves your computer.
-        </p>
+        <div className="mt-6 flex flex-col items-center gap-1">
+          <p className="text-center text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+            Everything stays on this device. Your vault is encrypted with AES-256-GCM and never leaves your computer.
+          </p>
+          {appVersion && (
+            <p className="text-[11px] text-slate-400 dark:text-slate-500">v{appVersion}</p>
+          )}
+        </div>
       </div>
     </div>
   )

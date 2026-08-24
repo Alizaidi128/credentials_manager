@@ -273,17 +273,9 @@ export function connectSangfor(
 // FortiVPN.exe exits 0 on success, non-zero on failure, and writes
 // human-readable status lines to stdout.
 
-const FORTI_CONNECT_TIMEOUT_MS = 60000
-
-function fortiVpnExePath(clientPath: string): string {
-  // clientPath = ...FortiClient\FortiClient.exe → replace exe name only
-  return clientPath.replace(/FortiClient\.exe$/i, 'FortiVPN.exe')
-}
-
-// Run FortiVPN.exe and collect stdout+stderr into a string.
-function runFortiVpn(vpnExe: string, args: string[]): Promise<{ code: number; output: string }> {
+function runFortiVpn(exe: string, args: string[]): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
-    const child = spawn(vpnExe, args, { windowsHide: true })
+    const child = spawn(exe, args, { windowsHide: true })
     let output = ''
     child.stdout?.on('data', (c: Buffer) => (output += c.toString('utf8')))
     child.stderr?.on('data', (c: Buffer) => (output += c.toString('utf8')))
@@ -292,80 +284,52 @@ function runFortiVpn(vpnExe: string, args: string[]): Promise<{ code: number; ou
   })
 }
 
-// Poll --cli --status until the tunnel shows as connected or we time out.
-// FortiVPN.exe --cli --connect exits immediately after "Starting …" and the
-// actual connection is handled asynchronously by the FortiClient service.
-async function pollFortiStatus(
-  vpnExe: string,
-  tunnel: string,
-  emit: (line: string) => void,
-  timeoutMs: number
-): Promise<{ ok: boolean; message: string }> {
-  const deadline = Date.now() + timeoutMs
-  let attempt = 0
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 2000))
-    attempt++
-    const { output } = await runFortiVpn(vpnExe, ['--cli', '--status', '--tunnel', tunnel])
-    const lower = output.toLowerCase()
-    emit(`[status check ${attempt}] ${output.trim()}`)
-
-    if (/status\s*:\s*up|connected|tunnel.*up/i.test(output)) {
-      return { ok: true, message: 'FortiClient VPN connected.' }
-    }
-    if (/invalid.*credential|authentication failed|login (failed|denied)|does not exist/i.test(lower)) {
-      return { ok: false, message: output.trim() || 'Authentication failed.' }
-    }
-    // "down" or "connecting" → keep polling
-  }
-  return { ok: false, message: `VPN tunnel "${tunnel}" did not come up within ${timeoutMs / 1000}s. Check FortiClient for details.` }
+function fortiIpsecScriptPath(): string {
+  return join(app.getAppPath().replace('app.asar', 'app.asar.unpacked'), 'scripts', 'forticlient-ipsec.ps1')
 }
 
 export function connectFortiClient(
-  clientPath: string,
+  _clientPath: string,
   request: VpnConnectRequest,
   onLog: LogSink
 ): Promise<VpnConnectResult> {
-  function emit(line: string): void {
-    if (line.trim()) onLog({ requestId: request.requestId, line })
-  }
-
-  const vpnExe = fortiVpnExePath(clientPath)
-
-  return runFortiVpn(vpnExe, [
-    '--cli', '--connect',
-    '--tunnel', request.host,
-    '--username', request.username,
-    '--password', request.password,
-    '--savecredentials'
-  ]).then(({ code, output }) => {
-    output.split(/\r?\n/).forEach(emit)
-
-    // Hard failure before connection attempt even started
-    if (code !== 0 || /does not exist|error:/i.test(output)) {
-      return { ok: false, message: output.trim() || `FortiVPN.exe exited with code ${code}.` }
+  return new Promise((resolve) => {
+    function emit(line: string): void {
+      if (line.trim()) onLog({ requestId: request.requestId, line })
     }
 
-    // "Starting …" printed → poll status until connected or timeout
-    emit('Connection initiated — polling for tunnel status…')
-    return pollFortiStatus(vpnExe, request.host, emit, FORTI_CONNECT_TIMEOUT_MS)
+    const child = spawn('powershell.exe', [
+      '-ExecutionPolicy', 'Bypass',
+      '-File', fortiIpsecScriptPath(),
+      '-TunnelName', request.host,
+      '-Username', request.username,
+      '-Password', request.password
+    ], { windowsHide: true })
+
+    child.stdout?.on('data', (c: Buffer) => c.toString('utf8').split(/\r?\n/).forEach(emit))
+    child.stderr?.on('data', (c: Buffer) => c.toString('utf8').split(/\r?\n/).forEach(emit))
+    child.on('error', (err) => resolve({ ok: false, message: `Could not start PowerShell: ${err.message}` }))
+    child.on('exit', (code) => {
+      resolve(code === 0
+        ? { ok: true, message: 'FortiClient IPSec VPN connected.' }
+        : { ok: false, message: `FortiClient connection failed (exit ${code}). Check VPN log for details.` })
+    })
   })
 }
 
-export function disconnectFortiClient(clientPath: string): Promise<VpnConnectResult> {
+export function disconnectFortiClient(_clientPath: string): Promise<VpnConnectResult> {
   return new Promise((resolve) => {
-    const vpnExe = fortiVpnExePath(clientPath)
-    const child = spawn(vpnExe, ['--cli', '--disconnect'], { windowsHide: true })
+    // GetActiveTunnel() returns the current tunnel name; disconnect it.
+    const ps = `$vpn = New-Object -ComObject 'FCCOMInt.XVPN.1'; $t = $vpn.GetActiveTunnel(); if ($t) { $vpn.Disconnect($t); Write-Host "Disconnected $t" } else { Write-Host 'No active tunnel' }`
+    const child = spawn('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-Command', ps], { windowsHide: true })
     let output = ''
     child.stdout?.on('data', (c: Buffer) => (output += c.toString('utf8')))
     child.stderr?.on('data', (c: Buffer) => (output += c.toString('utf8')))
-    child.on('error', (err) => resolve({ ok: false, message: `Could not run FortiVPN.exe: ${err.message}` }))
-    child.on('exit', (code) => {
-      resolve({
-        ok: code === 0,
-        message: output.trim() || (code === 0 ? 'FortiClient VPN disconnected.' : `FortiVPN.exe exited with code ${code}.`)
-      })
-    })
+    child.on('error', (err) => resolve({ ok: false, message: err.message }))
+    child.on('exit', (code) => resolve({
+      ok: code === 0,
+      message: output.trim() || (code === 0 ? 'FortiClient VPN disconnected.' : 'Disconnect failed.')
+    }))
   })
 }
 
@@ -513,6 +477,148 @@ export function disconnectCheckpoint(tracPath: string): Promise<VpnConnectResult
       })
     })
   })
+}
+
+// ── OpenConnect (FortiClient SSL-VPN) ────────────────────────────────────────
+//
+// openconnect --protocol=fortinet connects to FortiClient SSL-VPN gateways
+// without using the FortiClient application at all.  The process stays alive
+// for the duration of the tunnel (like AnyConnect's vpncli); we kill it to
+// disconnect.  openconnect writes status to stderr; success is indicated by
+// "Tunnel connected" / "ESP tunnel connected" in the output.
+//
+// FortiGate gateways almost always use self-signed or private-CA certificates.
+// GnuTLS builds of openconnect exit immediately on cert verification failure
+// rather than prompting.  We therefore do a pre-flight fetch of the server
+// certificate fingerprint (via .NET TcpClient/SslStream, ignoring validation)
+// and pass it as --servercert=pin-sha256:HASH so openconnect can trust it.
+//
+// Requirements on the machine:
+//   • openconnect.exe installed (openconnect-gui package includes it)
+//   • TAP-Windows adapter driver (bundled with the installer)
+//   • App must run as Administrator (TAP interface creation requires it)
+
+let openConnectChild: ChildProcessWithoutNullStreams | null = null
+
+// Probe the server with a dummy --servercert pin. OpenConnect will fail but
+// print the real pin in its error output, which we then parse and reuse.
+function probeServerCertPin(
+  openconnectPath: string,
+  server: string,
+  emit: (l: string) => void
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      openconnectPath,
+      ['--protocol=fortinet', '--servercert=pin-sha256:AAAA==', '--non-inter', server],
+      { windowsHide: true }
+    )
+    let output = ''
+    const collect = (c: Buffer): void => { output += c.toString('utf8') }
+    child.stdout?.on('data', collect)
+    child.stderr?.on('data', collect)
+    child.on('error', () => resolve(null))
+    child.on('exit', () => {
+      // openconnect prints: "...match server's certificate: pin-sha256:BASE64="
+      const match = output.match(/pin-sha256:[A-Za-z0-9+/]+=*/)
+      const pin = match?.[0]
+      if (pin && pin !== 'pin-sha256:AAAA==') {
+        emit(`Server cert pin: ${pin}`)
+        resolve(pin)
+      } else {
+        emit('Could not extract server cert pin from probe — connection may fail')
+        resolve(null)
+      }
+    })
+  })
+}
+
+export async function connectOpenConnect(
+  openconnectPath: string,
+  request: VpnConnectRequest,
+  onLog: LogSink
+): Promise<VpnConnectResult> {
+  if (openConnectChild) {
+    return { ok: false, message: 'An OpenConnect VPN session is already active.' }
+  }
+
+  function emit(line: string): void {
+    if (line.trim()) onLog({ requestId: request.requestId, line })
+  }
+
+  const server = request.port?.trim() ? `${request.host}:${request.port.trim()}` : request.host
+
+  emit('Probing server certificate...')
+  const certPin = await probeServerCertPin(openconnectPath, server, emit)
+
+  return new Promise((resolve) => {
+    let settled = false
+
+    function finish(ok: boolean, message: string): void {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      if (!ok && openConnectChild) {
+        openConnectChild.kill()
+        openConnectChild = null
+      }
+      resolve({ ok, message })
+    }
+
+    const certArgs = certPin ? [`--servercert=${certPin}`] : []
+
+    const child = spawn(
+      openconnectPath,
+      ['--protocol=fortinet', `--user=${request.username}`, '--passwd-on-stdin', ...certArgs, server],
+      { windowsHide: true }
+    ) as ChildProcessWithoutNullStreams
+    openConnectChild = child
+
+    child.stdin.write(`${request.password}\n`)
+
+    const timeout = setTimeout(() => {
+      finish(false, 'Timed out waiting for OpenConnect to connect.')
+    }, 90000)
+
+    function handleChunk(chunk: Buffer): void {
+      const text = chunk.toString('utf8')
+      text.split(/\r?\n/).forEach(emit)
+      if (settled) return
+
+      const lower = text.toLowerCase()
+      if (
+        /tunnel connected|esp tunnel connected|connected tun|established dtls|using wintun device|configured as \d+\.\d+\.\d+\.\d+|session authentication will expire/.test(lower)
+      ) {
+        finish(true, 'OpenConnect SSL VPN connected.')
+      } else if (/authentication failure|login failed|no such host|connection refused|failed to open https/.test(lower)) {
+        finish(false, text.split(/\r?\n/).filter((l) => l.trim()).pop() ?? 'OpenConnect connection failed.')
+      }
+    }
+
+    child.stdout?.on('data', handleChunk)
+    child.stderr?.on('data', handleChunk)
+
+    child.on('error', (err) => {
+      finish(false, `Could not start OpenConnect: ${err.message}`)
+    })
+
+    child.on('exit', (code) => {
+      if (openConnectChild === child) openConnectChild = null
+      if (!settled) {
+        finish(code === 0, code === 0 ? 'OpenConnect exited.' : `OpenConnect exited with code ${code}.`)
+      }
+    })
+  })
+}
+
+export function disconnectOpenConnect(): Promise<VpnConnectResult> {
+  if (!openConnectChild) {
+    return Promise.resolve({ ok: true, message: 'No active OpenConnect session.' })
+  }
+  const child = openConnectChild
+  openConnectChild = null
+  child.kill()
+  return Promise.resolve({ ok: true, message: 'OpenConnect SSL VPN disconnected.' })
 }
 
 // Deliberately not automated: killing EasyConnect.exe (via taskkill) gets

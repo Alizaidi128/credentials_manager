@@ -19,6 +19,7 @@ const emptyForm: FormState = {
 
   vpnType: 'none',
   vpnHost: '',
+  vpnPort: '',
   vpnUsername: '',
   vpnPassword: '',
   vpnPreSharedKey: '',
@@ -49,8 +50,9 @@ const VPN_TYPE_LABELS: Record<VpnType, string> = {
   none: 'No VPN required',
   'cisco-anyconnect': 'Cisco AnyConnect',
   sangfor: 'Sangfor (EasyConnect)',
-  'forti-client': 'Fortinet FortiClient',
-  checkpoint: 'Check Point Endpoint Security'
+  'forti-client': 'Fortinet FortiClient (IPSec)',
+  checkpoint: 'Check Point Endpoint Security',
+  openconnect: 'FortiClient SSL-VPN (OpenConnect)'
 }
 
 const VPN_HOST_PLACEHOLDERS: Record<VpnType, string> = {
@@ -58,7 +60,8 @@ const VPN_HOST_PLACEHOLDERS: Record<VpnType, string> = {
   'cisco-anyconnect': 'vpn.example.com',
   sangfor: 'https://vpn.example.com:4430',
   'forti-client': 'e.g. AMANA TAKAFUL_SLT  (exact tunnel name)',
-  checkpoint: 'e.g. Solarelle Checkpoint VPN  (exact site name)'
+  checkpoint: 'e.g. Solarelle Checkpoint VPN  (exact site name)',
+  openconnect: 'vpn.example.com  (SSL gateway hostname or IP)'
 }
 
 const SERVER_TYPE_LABELS: Record<ServerType, string> = {
@@ -257,6 +260,17 @@ export function EntryModal({ initial, onCancel, onSave }: EntryModalProps): JSX.
                     className={inputClass()}
                   />
                 </div>
+                {form.vpnType === 'openconnect' && (
+                  <div>
+                    <label className={labelClass()}>Port</label>
+                    <input
+                      value={form.vpnPort}
+                      onChange={(e) => update('vpnPort', e.target.value)}
+                      placeholder="443"
+                      className={inputClass()}
+                    />
+                  </div>
+                )}
                 <div>
                   <label className={labelClass()}>VPN Username</label>
                   <input
