@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AppEntry, CredentialEntry, VpnLogEvent, VpnOtpRequest } from '@shared/types'
 import { CopyField } from './CopyField'
-import { DatabaseIcon, GlobeIcon, PencilIcon, PlugIcon, TrashIcon } from './icons'
+import { DatabaseIcon, GlobeIcon, PencilIcon, PlugIcon, ServerIcon, TrashIcon } from './icons'
 
 interface EntryDetailProps {
   entry: CredentialEntry
@@ -14,8 +14,10 @@ type ActionStatus = { kind: 'success' | 'error'; message: string } | null
 export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.Element {
   const [launchingApp, setLaunchingApp] = useState(false)
   const [launchingDb, setLaunchingDb] = useState(false)
+  const [launchingServer, setLaunchingServer] = useState(false)
   const [appStatus, setAppStatus] = useState<ActionStatus>(null)
   const [dbStatus, setDbStatus] = useState<ActionStatus>(null)
+  const [serverStatus, setServerStatus] = useState<ActionStatus>(null)
   const [vpnLog, setVpnLog] = useState<string[]>([])
   const [showLog, setShowLog] = useState(false)
   const [vpnConnected, setVpnConnected] = useState(false)
@@ -27,10 +29,12 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
   useEffect(() => {
     setAppStatus(null)
     setDbStatus(null)
+    setServerStatus(null)
     setVpnLog([])
     setShowLog(false)
     setLaunchingApp(false)
     setLaunchingDb(false)
+    setLaunchingServer(false)
     setVpnConnected(false)
     setAppSelectorOpen(false)
   }, [entry.id])
@@ -140,6 +144,30 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
     })
     setDbStatus({ kind: result.ok ? 'success' : 'error', message: result.message })
     setLaunchingDb(false)
+  }
+
+  async function handleConnectServer(): Promise<void> {
+    setServerStatus(null)
+
+    if (entry.vpnType !== 'none' && !vpnConnected) {
+      setServerStatus({ kind: 'error', message: 'Connect VPN first before connecting to the server.' })
+      return
+    }
+
+    const serverType = entry.serverType ?? 'none'
+    if (serverType === 'none') return
+
+    setLaunchingServer(true)
+    const result = await window.api.launchServer({
+      serverType,
+      host: entry.serverHost,
+      port: entry.serverPort,
+      username: entry.serverUsername,
+      password: entry.serverPassword,
+      sftpServer: entry.serverSftpServer
+    })
+    setServerStatus({ kind: result.ok ? 'success' : 'error', message: result.message })
+    setLaunchingServer(false)
   }
 
   const hasVpn = entry.vpnType !== 'none'
@@ -295,6 +323,18 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
                 <DatabaseIcon className="h-4 w-4" />
                 {launchingDb ? 'Launching…' : 'Connect Database'}
               </button>
+
+              {(entry.serverType ?? 'none') !== 'none' && (
+                <button
+                  type="button"
+                  onClick={handleConnectServer}
+                  disabled={launchingServer}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:border-brand-400 hover:text-brand-600 dark:border-border-dark dark:text-slate-300 dark:hover:text-brand-400 disabled:pointer-events-none disabled:opacity-60"
+                >
+                  <ServerIcon className="h-4 w-4" />
+                  {launchingServer ? 'Connecting…' : entry.serverType === 'winscp' ? 'Connect WinSCP' : 'Connect RDP'}
+                </button>
+              )}
             </div>
 
             {appStatus && (
@@ -305,6 +345,11 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
             {dbStatus && (
               <p className={`mt-3 text-sm ${dbStatus.kind === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                 {dbStatus.message}
+              </p>
+            )}
+            {serverStatus && (
+              <p className={`mt-3 text-sm ${serverStatus.kind === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                {serverStatus.message}
               </p>
             )}
 
@@ -369,6 +414,25 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
                     </div>
                   </div>
                 ))}
+              </div>
+            </section>
+          )}
+
+          {(entry.serverType ?? 'none') !== 'none' && (
+            <section className="rounded-2xl border border-border bg-surface p-5 shadow-card dark:border-border-dark dark:bg-surface-dark dark:shadow-card-dark">
+              <h3 className="mb-4 text-xs font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
+                Server — {entry.serverType === 'winscp' ? 'Linux / SFTP (WinSCP)' : 'Windows (Remote Desktop)'}
+              </h3>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <CopyField label="Host" value={entry.serverHost} monospace />
+                <CopyField label="Port" value={entry.serverPort} monospace />
+                <CopyField label="Username" value={entry.serverUsername} monospace />
+                <CopyField label="Password" value={entry.serverPassword} secret monospace />
+                {entry.serverType === 'winscp' && entry.serverSftpServer && (
+                  <div className="sm:col-span-2">
+                    <CopyField label="SFTP Server" value={entry.serverSftpServer} monospace />
+                  </div>
+                )}
               </div>
             </section>
           )}

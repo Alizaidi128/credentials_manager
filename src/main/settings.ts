@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   sangforSettleMs: 10000,
   fortiClientPath: 'C:\\Program Files\\Fortinet\\FortiClient\\FortiClient.exe',
   checkpointPath: 'C:\\Program Files (x86)\\CheckPoint\\Endpoint Connect\\trac.exe',
+  winscpPath: 'C:\\Program Files (x86)\\WinSCP\\WinSCP.exe',
   smtpHost: 'smtp.office365.com',
   smtpPort: 587,
   smtpUser: '',

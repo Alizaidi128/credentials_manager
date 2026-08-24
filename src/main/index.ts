@@ -7,9 +7,10 @@ import * as vault from './vault'
 import * as settings from './settings'
 import * as vpn from './vpn'
 import * as dbLaunch from './dbLaunch'
+import * as serverLaunch from './serverLaunch'
 import * as otp from './otp'
 import * as exportVault from './export'
-import type { AppSettings, CredentialEntry, DbLaunchRequest, VpnConnectRequest, VpnType, VpnOtpRequest } from '../shared/types'
+import type { AppSettings, CredentialEntry, DbLaunchRequest, ServerLaunchRequest, VpnConnectRequest, VpnType, VpnOtpRequest } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -287,6 +288,11 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('db:launch', async (_event, request: DbLaunchRequest) => {
     return dbLaunch.launch(request)
+  })
+
+  ipcMain.handle('server:launch', async (_event, request: ServerLaunchRequest) => {
+    const appSettings = await settings.getSettings()
+    return serverLaunch.launchServer(appSettings.winscpPath, request)
   })
 
   ipcMain.handle('shell:openUrl', async (_event, url: string) => {

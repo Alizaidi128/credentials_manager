@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react'
-import type { AppEntry, CredentialEntry, DbClientType, VpnType } from '@shared/types'
+import type { AppEntry, CredentialEntry, DbClientType, ServerType, VpnType } from '@shared/types'
 import { EyeIcon, EyeOffIcon } from './icons'
 
 interface EntryModalProps {
@@ -24,6 +24,13 @@ const emptyForm: FormState = {
   vpnPreSharedKey: '',
 
   apps: [newApp()],
+
+  serverType: 'none',
+  serverHost: '',
+  serverPort: '',
+  serverUsername: '',
+  serverPassword: '',
+  serverSftpServer: '',
 
   dbClient: 'custom',
   dbHost: '',
@@ -52,6 +59,18 @@ const VPN_HOST_PLACEHOLDERS: Record<VpnType, string> = {
   sangfor: 'https://vpn.example.com:4430',
   'forti-client': 'e.g. AMANA TAKAFUL_SLT  (exact tunnel name)',
   checkpoint: 'e.g. Solarelle Checkpoint VPN  (exact site name)'
+}
+
+const SERVER_TYPE_LABELS: Record<ServerType, string> = {
+  none: 'No server connection',
+  winscp: 'Linux / SFTP (WinSCP)',
+  rdp: 'Windows (Remote Desktop)'
+}
+
+const SERVER_DEFAULT_PORT: Record<ServerType, string> = {
+  none: '',
+  winscp: '22',
+  rdp: '3389'
 }
 
 const DB_CLIENT_LABELS: Record<DbClientType, string> = {
@@ -154,7 +173,7 @@ export function EntryModal({ initial, onCancel, onSave }: EntryModalProps): JSX.
   useEffect(() => {
     if (initial) {
       const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = initial
-      setForm(rest)
+      setForm({ ...emptyForm, ...rest })
     } else {
       setForm(emptyForm)
     }
@@ -334,6 +353,84 @@ export function EntryModal({ initial, onCancel, onSave }: EntryModalProps): JSX.
                 + Add another app
               </button>
             </div>
+          </Section>
+
+          <Section title="Server">
+            <div>
+              <label className={labelClass()}>Server Type</label>
+              <select
+                value={form.serverType}
+                onChange={(e) => {
+                  const t = e.target.value as ServerType
+                  setForm((prev) => ({
+                    ...prev,
+                    serverType: t,
+                    serverPort: prev.serverPort || SERVER_DEFAULT_PORT[t]
+                  }))
+                }}
+                className={inputClass()}
+              >
+                {(Object.keys(SERVER_TYPE_LABELS) as ServerType[]).map((type) => (
+                  <option key={type} value={type}>
+                    {SERVER_TYPE_LABELS[type]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {form.serverType !== 'none' && (
+              <>
+                <div>
+                  <label className={labelClass()}>Host</label>
+                  <input
+                    value={form.serverHost}
+                    onChange={(e) => update('serverHost', e.target.value)}
+                    placeholder="192.168.1.100"
+                    className={inputClass('font-mono')}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass()}>Port</label>
+                  <input
+                    value={form.serverPort}
+                    onChange={(e) => update('serverPort', e.target.value)}
+                    placeholder={SERVER_DEFAULT_PORT[form.serverType]}
+                    className={inputClass('font-mono')}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass()}>Username</label>
+                  <input
+                    value={form.serverUsername}
+                    onChange={(e) => update('serverUsername', e.target.value)}
+                    className={inputClass()}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass()}>Password</label>
+                  <SecretInput
+                    fieldKey="serverPassword"
+                    value={form.serverPassword}
+                    onChange={(v) => update('serverPassword', v)}
+                    revealed={revealed}
+                    onToggleReveal={(k) => setRevealed((p) => ({ ...p, [k]: !p[k] }))}
+                  />
+                </div>
+                {form.serverType === 'winscp' && (
+                  <div className="sm:col-span-2">
+                    <label className={labelClass()}>SFTP Server (optional)</label>
+                    <input
+                      value={form.serverSftpServer}
+                      onChange={(e) => update('serverSftpServer', e.target.value)}
+                      placeholder="sudo /usr/libexec/openssh/sftp-server"
+                      className={inputClass('font-mono')}
+                    />
+                    <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                      Override WinSCP's SFTP server path. Leave blank for default.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
           </Section>
 
           <Section title="Database">

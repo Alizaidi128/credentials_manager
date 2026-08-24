@@ -1,5 +1,7 @@
 export type VpnType = 'none' | 'cisco-anyconnect' | 'sangfor' | 'forti-client' | 'checkpoint'
 
+export type ServerType = 'none' | 'winscp' | 'rdp'
+
 export type DbClientType =
   | 'toad'
   | 'dbeaver'
@@ -41,6 +43,13 @@ export interface CredentialEntry {
   dbCommandTemplate: string
   dbOpenInTerminal: boolean
 
+  serverType: ServerType
+  serverHost: string
+  serverPort: string
+  serverUsername: string
+  serverPassword: string
+  serverSftpServer: string
+
   notes: string
   createdAt: number
   updatedAt: number
@@ -66,6 +75,7 @@ export interface AppSettings {
   smtpFrom: string
   // Per-user email — OTP and recovery key emails are sent here
   userEmail: string
+  winscpPath: string
   // 0 = unlimited (never lock on idle)
   idleTimeoutMinutes: number
 }
@@ -134,6 +144,20 @@ export interface DbLaunchRequest {
 }
 
 export interface DbLaunchResult {
+  ok: boolean
+  message: string
+}
+
+export interface ServerLaunchRequest {
+  serverType: Exclude<ServerType, 'none'>
+  host: string
+  port: string
+  username: string
+  password: string
+  sftpServer: string
+}
+
+export interface ServerLaunchResult {
   ok: boolean
   message: string
 }

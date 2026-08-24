@@ -184,6 +184,16 @@ export function PlugIcon(props: IconProps): JSX.Element {
   )
 }
 
+export function ServerIcon(props: IconProps): JSX.Element {
+  return (
+    <svg {...base} {...props}>
+      <rect x="2" y="2" width="20" height="8" rx="2" />
+      <rect x="2" y="14" width="20" height="8" rx="2" />
+      <path d="M6 6h.01M6 18h.01" />
+    </svg>
+  )
+}
+
 export function SettingsIcon(props: IconProps): JSX.Element {
   return (
     <svg {...base} {...props}>

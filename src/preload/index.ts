@@ -7,6 +7,8 @@ import type {
   ExportDownloadResult,
   ExportShareResult,
   ImportOpenResult,
+  ServerLaunchRequest,
+  ServerLaunchResult,
   UnlockResult,
   VpnConnectRequest,
   VpnConnectResult,
@@ -57,6 +59,8 @@ const api = {
 
   launchDb: (request: DbLaunchRequest): Promise<DbLaunchResult> =>
     ipcRenderer.invoke('db:launch', request),
+  launchServer: (request: ServerLaunchRequest): Promise<ServerLaunchResult> =>
+    ipcRenderer.invoke('server:launch', request),
   openUrl: (url: string): Promise<void> => ipcRenderer.invoke('shell:openUrl', url),
 
   onForceLock: (callback: () => void): (() => void) => {

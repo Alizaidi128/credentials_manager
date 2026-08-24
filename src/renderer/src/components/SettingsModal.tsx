@@ -110,6 +110,21 @@ export function SettingsModal({ onClose }: SettingsModalProps): JSX.Element {
                   Path to trac.exe. Site name must match what appears in the Check Point GUI. Supports 2FA.
                 </p>
               </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  WinSCP Path
+                </label>
+                <input
+                  value={settings.winscpPath}
+                  onChange={(e) => setSettings({ ...settings, winscpPath: e.target.value })}
+                  placeholder="C:\Program Files (x86)\WinSCP\WinSCP.exe"
+                  className="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-slate-900 outline-none ring-brand-500/40 transition focus:ring-2 dark:border-border-dark dark:bg-panel-dark dark:text-white"
+                />
+                <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                  Path to WinSCP.exe. Used for Linux server connections (SFTP).
+                </p>
+              </div>
             </div>
           ) : (
             <p className="text-sm text-slate-400 dark:text-slate-500">Loading…</p>
