@@ -176,7 +176,7 @@ const SANGFOR_PROCESS_NAME = 'EasyConnect'
 const SANGFOR_LAUNCH_SETTLE_MS = 1500
 
 function sangforLoginScriptPath(): string {
-  return join(app.getAppPath(), 'scripts', 'sangfor-login.ps1')
+  return join(app.getAppPath().replace('app.asar', 'app.asar.unpacked'), 'scripts', 'sangfor-login.ps1')
 }
 
 export function connectSangfor(

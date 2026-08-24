@@ -13,6 +13,8 @@ files:
 
 # Pack into asar archive (faster load, hides source)
 asar: true
+asarUnpack:
+  - scripts/*.ps1
 
 # ── Windows ───────────────────────────────────────────────────────────────────
 win:
