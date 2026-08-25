@@ -23,6 +23,7 @@ win:
       arch:
         - x64
   icon: resources/icon.ico          # 256×256 ICO — place this file to brand the installer
+  requestedExecutionLevel: requireAdministrator
 
 # ── NSIS wizard installer ─────────────────────────────────────────────────────
 nsis:

@@ -23,7 +23,6 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
   const [vpnConnected, setVpnConnected] = useState(false)
   const [otpRequest, setOtpRequest] = useState<VpnOtpRequest | null>(null)
   const [otpValue, setOtpValue] = useState('')
-  const [appSelectorOpen, setAppSelectorOpen] = useState(false)
   const requestIdRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -36,7 +35,6 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
     setLaunchingDb(false)
     setLaunchingServer(false)
     setVpnConnected(false)
-    setAppSelectorOpen(false)
   }, [entry.id])
 
   useEffect(() => {
@@ -67,53 +65,34 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
     }
   }
 
-  async function handleConnectAndLaunch(): Promise<void> {
+  async function handleConnectVpn(): Promise<void> {
     setAppStatus(null)
     setLaunchingApp(true)
 
-    if (entry.vpnType !== 'none') {
-      if (!entry.vpnHost.trim()) {
-        setAppStatus({ kind: 'error', message: 'VPN host is not configured for this entry.' })
-        setLaunchingApp(false)
-        return
-      }
-      const requestId = crypto.randomUUID()
-      requestIdRef.current = requestId
-      setVpnLog([])
-      setShowLog(true)
-      const result = await window.api.connectVpn({
-        requestId,
-        vpnType: entry.vpnType,
-        host: entry.vpnHost,
-        port: entry.vpnPort ?? '',
-        username: entry.vpnUsername,
-        password: entry.vpnPassword
-      })
-      if (!result.ok) {
-        setAppStatus({ kind: 'error', message: result.message })
-        setLaunchingApp(false)
-        return
-      }
-      setVpnConnected(true)
+    if (!entry.vpnHost.trim()) {
+      setAppStatus({ kind: 'error', message: 'VPN host is not configured for this entry.' })
+      setLaunchingApp(false)
+      return
     }
-
+    const requestId = crypto.randomUUID()
+    requestIdRef.current = requestId
+    setVpnLog([])
+    setShowLog(true)
+    const result = await window.api.connectVpn({
+      requestId,
+      vpnType: entry.vpnType,
+      host: entry.vpnHost,
+      port: entry.vpnPort ?? '',
+      username: entry.vpnUsername,
+      password: entry.vpnPassword
+    })
     setLaunchingApp(false)
-
-    const validApps = entry.apps.filter((a) => a.url.trim())
-    if (validApps.length === 0) {
-      setAppStatus({ kind: 'success', message: entry.vpnType !== 'none' ? 'VPN connected.' : 'No app URL configured.' })
-    } else if (validApps.length === 1) {
-      await openApp(validApps[0])
-      setAppStatus({ kind: 'success', message: 'App opened.' })
-    } else {
-      setAppSelectorOpen(true)
+    if (!result.ok) {
+      setAppStatus({ kind: 'error', message: result.message })
+      return
     }
-  }
-
-  async function handleSelectApp(app: AppEntry): Promise<void> {
-    setAppSelectorOpen(false)
-    await openApp(app)
-    setAppStatus({ kind: 'success', message: `${app.name || 'App'} opened.` })
+    setVpnConnected(true)
+    setAppStatus({ kind: 'success', message: 'VPN connected.' })
   }
 
   async function handleDisconnectVpn(): Promise<void> {
@@ -172,16 +151,11 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
   }
 
   const hasVpn = entry.vpnType !== 'none'
-  const validApps = entry.apps.filter((a) => a.url.trim())
-  const multipleApps = validApps.length > 1
-
   const connectButtonLabel = vpnConnected
-    ? multipleApps ? 'VPN Connected — Select App' : 'VPN Connected'
+    ? 'VPN Connected'
     : launchingApp
-      ? hasVpn ? 'Connecting VPN…' : 'Opening…'
-      : hasVpn
-        ? multipleApps ? 'Connect VPN & Select App' : 'Connect VPN & Open App'
-        : multipleApps ? 'Select App' : 'Open App'
+      ? 'Connecting VPN…'
+      : 'Connect VPN'
 
   return (
     <>
@@ -221,36 +195,6 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
         </div>
       )}
 
-      {appSelectorOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm"
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setAppSelectorOpen(false) }}
-        >
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 shadow-popover dark:border-border-dark dark:bg-surface-dark">
-            <h3 className="mb-4 text-base font-semibold text-slate-900 dark:text-white">Select App to Open</h3>
-            <div className="space-y-2">
-              {validApps.map((app) => (
-                <button
-                  key={app.id}
-                  type="button"
-                  onClick={() => handleSelectApp(app)}
-                  className="flex w-full flex-col items-start rounded-xl border border-border px-4 py-3 text-left transition hover:border-brand-400 hover:bg-panel dark:border-border-dark dark:hover:bg-panel-dark"
-                >
-                  <span className="text-sm font-medium text-slate-900 dark:text-white">{app.name || 'Unnamed App'}</span>
-                  <span className="mt-0.5 text-xs font-mono text-slate-400 dark:text-slate-500 truncate max-w-full">{app.url}</span>
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => setAppSelectorOpen(false)}
-              className="mt-4 w-full rounded-lg border border-border py-2 text-sm font-medium text-slate-600 transition hover:bg-panel dark:border-border-dark dark:text-slate-300 dark:hover:bg-panel-dark"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
 
       <div key={entry.id} className="h-full overflow-y-auto">
       <div className="mx-auto max-w-2xl animate-slide-in-right px-8 py-8">
@@ -294,15 +238,17 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
               Quick Actions
             </h3>
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={vpnConnected && multipleApps ? () => setAppSelectorOpen(true) : handleConnectAndLaunch}
-                disabled={launchingApp || (vpnConnected && !multipleApps)}
-                className="flex items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 px-3.5 py-2 text-sm font-medium text-white shadow-md shadow-brand-600/25 transition hover:from-brand-600 hover:to-brand-700 disabled:pointer-events-none disabled:opacity-60"
-              >
-                <GlobeIcon className="h-4 w-4" />
-                {connectButtonLabel}
-              </button>
+              {hasVpn && (
+                <button
+                  type="button"
+                  onClick={handleConnectVpn}
+                  disabled={launchingApp || vpnConnected}
+                  className="flex items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 px-3.5 py-2 text-sm font-medium text-white shadow-md shadow-brand-600/25 transition hover:from-brand-600 hover:to-brand-700 disabled:pointer-events-none disabled:opacity-60"
+                >
+                  <PlugIcon className="h-4 w-4" />
+                  {connectButtonLabel}
+                </button>
+              )}
 
               {hasVpn && (
                 <button
