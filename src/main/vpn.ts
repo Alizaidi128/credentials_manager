@@ -11,7 +11,32 @@ type LogSink = (event: VpnLogEvent) => void
  * the Cisco CLI itself only supports a single active session per machine. */
 let activeChild: ChildProcessWithoutNullStreams | null = null
 
-export function connectCiscoAnyConnect(
+const SVC_CONFLICT = '__anyconnect_svc_conflict__'
+
+function restartVpnAgentService(onLog: LogSink, requestId: string): Promise<void> {
+  const emit = (l: string): void => { if (l.trim()) onLog({ requestId, line: l }) }
+  return new Promise((resolve) => {
+    const stop = spawn('net', ['stop', 'vpnagent'], { windowsHide: true })
+    let buf = ''
+    stop.stdout?.on('data', (c: Buffer) => (buf += c.toString('utf8')))
+    stop.stderr?.on('data', (c: Buffer) => (buf += c.toString('utf8')))
+    stop.on('exit', () => {
+      buf.split(/\r?\n/).forEach(emit)
+      buf = ''
+      const start = spawn('net', ['start', 'vpnagent'], { windowsHide: true })
+      start.stdout?.on('data', (c: Buffer) => (buf += c.toString('utf8')))
+      start.stderr?.on('data', (c: Buffer) => (buf += c.toString('utf8')))
+      start.on('exit', () => {
+        buf.split(/\r?\n/).forEach(emit)
+        setTimeout(resolve, 3000) // give the service time to fully start
+      })
+      start.on('error', () => setTimeout(resolve, 3000))
+    })
+    stop.on('error', () => { emit('Could not stop vpnagent — service may already be stopped'); resolve() })
+  })
+}
+
+function connectCiscoAnyConnectOnce(
   cliPath: string,
   request: VpnConnectRequest,
   onLog: LogSink
@@ -106,6 +131,10 @@ export function connectCiscoAnyConnect(
       // words like "error" and "denied" in benign sentences (e.g. "...unless
       // the reason for the error condition is known."), which would otherwise
       // trip a false failure while a prompt is still on its way.
+      if (/connect not available.*another anyconnect|another anyconnect application is running/i.test(buffer)) {
+        finish(false, SVC_CONFLICT)
+        return
+      }
       if (
         /login denied|login failed|authentication failed|connection( attempt)? (has failed|failed)|not able to establish|invalid (username|password|credentials)|vpn establishment capability failed/.test(
           lower
@@ -139,6 +168,21 @@ export function connectCiscoAnyConnect(
       }
     })
   })
+}
+
+export async function connectCiscoAnyConnect(
+  cliPath: string,
+  request: VpnConnectRequest,
+  onLog: LogSink
+): Promise<VpnConnectResult> {
+  const result = await connectCiscoAnyConnectOnce(cliPath, request, onLog)
+  if (result.message === SVC_CONFLICT) {
+    onLog({ requestId: request.requestId, line: 'AnyConnect service conflict detected — restarting vpnagent service...' })
+    await restartVpnAgentService(onLog, request.requestId)
+    onLog({ requestId: request.requestId, line: 'Service restarted — retrying connection...' })
+    return connectCiscoAnyConnectOnce(cliPath, request, onLog)
+  }
+  return result
 }
 
 export function disconnectCiscoAnyConnect(cliPath: string): Promise<VpnConnectResult> {
