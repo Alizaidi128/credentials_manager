@@ -305,6 +305,7 @@ function registerIpcHandlers(): void {
     await shell.openExternal(url)
   })
 
+
   ipcMain.handle('otp:request', async () => {
     try {
       const appSettings = await settings.getSettings()
@@ -383,14 +384,20 @@ app.whenReady().then(() => {
 
     autoUpdater.on('error', (err) => {
       console.error('Auto-updater error:', err.message)
+      const isNetworkError = /ERR_NETWORK|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|socket hang up/i.test(err.message)
+      if (isNetworkError) {
+        // Transient — network not ready yet. Retry in 60 seconds, no dialog.
+        setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 60_000)
+        return
+      }
       mainWindow?.webContents.send('update:error', { message: err.message })
       dialog.showErrorBox('Update check failed', err.message)
     })
 
     // Wait for renderer to be ready before first check, then every 4 hours
     mainWindow?.webContents.once('did-finish-load', () => {
-      setTimeout(() => autoUpdater.checkForUpdates(), 3000)
-      setInterval(() => autoUpdater.checkForUpdates(), 4 * 60 * 60 * 1000)
+      setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 15_000)
+      setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 4 * 60 * 60 * 1000)
     })
   }
 })
