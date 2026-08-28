@@ -382,11 +382,14 @@ app.whenReady().then(() => {
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
 
+    let updateDownloaded = false
+
     autoUpdater.on('update-available', (info) => {
       mainWindow?.webContents.send('update:available', { version: info.version })
     })
 
     autoUpdater.on('update-downloaded', (info) => {
+      updateDownloaded = true
       mainWindow?.webContents.send('update:downloaded', { version: info.version })
     })
 
@@ -394,8 +397,11 @@ app.whenReady().then(() => {
       console.error('Auto-updater error:', err.message)
       const isNetworkError = /ERR_NETWORK|ERR_INTERNET|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION|ERR_SOCKET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|ECONNRESET|ECONNABORTED|socket hang up/i.test(err.message)
       if (isNetworkError) {
-        // Transient — network not ready yet. Retry in 60 seconds, no dialog.
-        setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 60_000)
+        // Transient network error — retry once after 60s, but only if no update
+        // is already downloaded (re-checking would invalidate the ready installer).
+        if (!updateDownloaded) {
+          setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 60_000)
+        }
         return
       }
       mainWindow?.webContents.send('update:error', { message: err.message })
