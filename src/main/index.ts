@@ -342,7 +342,15 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('update:install', () => {
     isQuitting = true
-    autoUpdater.quitAndInstall()
+    try {
+      // isSilent=true: no installer wizard UI (applies changes in background)
+      // isForceRunAfter=true: relaunch app after update completes
+      autoUpdater.quitAndInstall(true, true)
+    } catch (err) {
+      console.error('quitAndInstall error:', err)
+      isQuitting = false
+      mainWindow?.webContents.send('update:error', { message: (err as Error).message ?? 'Install failed' })
+    }
   })
 }
 
