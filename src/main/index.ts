@@ -384,7 +384,7 @@ app.whenReady().then(() => {
 
     autoUpdater.on('error', (err) => {
       console.error('Auto-updater error:', err.message)
-      const isNetworkError = /ERR_NETWORK|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|socket hang up/i.test(err.message)
+      const isNetworkError = /ERR_NETWORK|ERR_INTERNET|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION|ERR_SOCKET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|ECONNRESET|ECONNABORTED|socket hang up/i.test(err.message)
       if (isNetworkError) {
         // Transient — network not ready yet. Retry in 60 seconds, no dialog.
         setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 60_000)
