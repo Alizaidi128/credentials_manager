@@ -544,6 +544,41 @@ export function disconnectCheckpoint(tracPath: string): Promise<VpnConnectResult
 
 let openConnectChild: ChildProcessWithoutNullStreams | null = null
 
+// Apply VPN routes and DNS from Vaultier's own process rather than relying on
+// OpenConnect's --script mechanism, which fails (ERROR_INVALID_FUNCTION) on
+// this machine regardless of whether cscript.exe or powershell.exe is used.
+// We parse route/DNS lines from OpenConnect's output and then spawn PowerShell
+// directly — no intermediate script file, no file-type-association dependency.
+function applyVpnRoutes(
+  routes: { addr: string; mask: string }[],
+  dnsServers: string[],
+  emit: (l: string) => void,
+  onDone: () => void
+): void {
+  if (routes.length === 0 && dnsServers.length === 0) { onDone(); return }
+
+  const routeCmds = routes
+    .map(r => `& route add ${r.addr} MASK ${r.mask} 0.0.0.0 IF $idx 2>$null`)
+    .join('; ')
+  const dnsCmd = dnsServers.length > 0
+    ? `Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses @('${dnsServers.join("','")}') -ErrorAction SilentlyContinue`
+    : ''
+  const body = [routeCmds, dnsCmd].filter(Boolean).join('; ')
+  const psCmd = `$iface = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like '*Wintun*' } | Select-Object -First 1; if ($iface) { $idx = $iface.InterfaceIndex; ${body} }`
+
+  emit(`Applying ${routes.length} VPN routes via PowerShell...`)
+  const ps = spawn('powershell.exe', [
+    '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-Command', psCmd
+  ], { windowsHide: true }) as ChildProcessWithoutNullStreams
+  ps.stdout?.on('data', (c: Buffer) => c.toString('utf8').split(/\r?\n/).forEach(emit))
+  ps.stderr?.on('data', (c: Buffer) => c.toString('utf8').split(/\r?\n/).forEach(emit))
+  ps.on('error', (err) => { emit(`Route setup warning: ${err.message}`); onDone() })
+  ps.on('exit', (code) => {
+    emit(code === 0 ? 'VPN routes configured.' : `Route setup exited with code ${code}`)
+    onDone()
+  })
+}
+
 // Probe the server with a dummy --servercert pin. OpenConnect will fail but
 // print the real pin in its error output, which we then parse and reuse.
 function probeServerCertPin(
@@ -611,9 +646,21 @@ export async function connectOpenConnect(
 
     const certArgs = certPin ? [`--servercert=${certPin}`] : []
 
+    // Collect routes and DNS from OpenConnect's output so we can apply them
+    // ourselves after connection — bypassing the broken --script spawn mechanism.
+    const routes: { addr: string; mask: string }[] = []
+    const dnsServers: string[] = []
+    let routesApplied = false
+
     const child = spawn(
       openconnectPath,
-      ['--protocol=fortinet', `--user=${request.username}`, '--passwd-on-stdin', ...certArgs, server],
+      [
+        '--protocol=fortinet',
+        `--user=${request.username}`,
+        '--passwd-on-stdin',
+        ...certArgs,
+        server
+      ],
       { windowsHide: true }
     ) as ChildProcessWithoutNullStreams
     openConnectChild = child
@@ -629,11 +676,26 @@ export async function connectOpenConnect(
       text.split(/\r?\n/).forEach(emit)
       if (settled) return
 
+      // Parse routes: "Got IPv4 route A.B.C.D/W.X.Y.Z"
+      const routeRe = /Got IPv4 route (\d+\.\d+\.\d+\.\d+)\/(\d+\.\d+\.\d+\.\d+)/g
+      let m: RegExpExecArray | null
+      while ((m = routeRe.exec(text)) !== null) routes.push({ addr: m[1], mask: m[2] })
+
+      // Parse DNS: "Got IPv4 DNS server A.B.C.D"
+      const dnsRe = /Got IPv4 DNS server (\d+\.\d+\.\d+\.\d+)/g
+      while ((m = dnsRe.exec(text)) !== null) {
+        if (!dnsServers.includes(m[1])) dnsServers.push(m[1])
+      }
+
       const lower = text.toLowerCase()
       if (
+        !routesApplied &&
         /tunnel connected|esp tunnel connected|connected tun|established dtls|using wintun device|configured as \d+\.\d+\.\d+\.\d+|session authentication will expire/.test(lower)
       ) {
-        finish(true, 'OpenConnect SSL VPN connected.')
+        routesApplied = true
+        applyVpnRoutes(routes, dnsServers, emit, () => {
+          finish(true, 'OpenConnect SSL VPN connected.')
+        })
       } else if (/authentication failure|login failed|no such host|connection refused|failed to open https/.test(lower)) {
         finish(false, text.split(/\r?\n/).filter((l) => l.trim()).pop() ?? 'OpenConnect connection failed.')
       }

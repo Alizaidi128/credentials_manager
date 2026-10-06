@@ -57,11 +57,11 @@ const api = {
     ipcRenderer.invoke('otp:verify', enteredOtp),
   hasPendingOtp: (): Promise<boolean> => ipcRenderer.invoke('otp:hasPending'),
 
+  openUrl: (url: string): Promise<void> => ipcRenderer.invoke('shell:openUrl', url),
   launchDb: (request: DbLaunchRequest): Promise<DbLaunchResult> =>
     ipcRenderer.invoke('db:launch', request),
   launchServer: (request: ServerLaunchRequest): Promise<ServerLaunchResult> =>
     ipcRenderer.invoke('server:launch', request),
-  openUrl: (url: string): Promise<void> => ipcRenderer.invoke('shell:openUrl', url),
 
   onForceLock: (callback: () => void): (() => void) => {
     const listener = (): void => callback()
