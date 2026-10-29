@@ -32,7 +32,7 @@ function App(): JSX.Element {
   } | null>(null)
   const [idleTimeoutMs, setIdleTimeoutMs] = useState(0)
   const [pendingUpdate, setPendingUpdate] = useState<{ version: string; downloading?: boolean } | null>(null)
-  const [connectedVpnEntryId, setConnectedVpnEntryId] = useState<string | null>(null)
+  const [connectedVpnEntryIds, setConnectedVpnEntryIds] = useState<string[]>([])
   const remindTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Stable ref so idle timer always calls the latest handleLock
@@ -221,9 +221,9 @@ function App(): JSX.Element {
             entry={selectedEntry}
             onEdit={() => setModalEntry(selectedEntry)}
             onDelete={() => setPendingDelete(selectedEntry)}
-            vpnConnected={connectedVpnEntryId === selectedEntry.id}
-            onVpnConnect={() => setConnectedVpnEntryId(selectedEntry.id)}
-            onVpnDisconnect={() => setConnectedVpnEntryId(null)}
+            vpnConnected={connectedVpnEntryIds.includes(selectedEntry.id)}
+            onVpnConnect={() => setConnectedVpnEntryIds((prev) => prev.includes(selectedEntry.id) ? prev : [...prev, selectedEntry.id])}
+            onVpnDisconnect={() => setConnectedVpnEntryIds((prev) => prev.filter((id) => id !== selectedEntry.id))}
           />
         ) : (
           <EmptyState hasEntries={entries.length > 0} onAdd={() => setModalEntry('new')} />
