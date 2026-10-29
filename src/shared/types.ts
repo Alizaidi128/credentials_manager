@@ -2,6 +2,17 @@ export type VpnType = 'none' | 'cisco-anyconnect' | 'sangfor' | 'forti-client' |
 
 export type ServerType = 'none' | 'winscp' | 'rdp'
 
+export interface ServerEntry {
+  id: string
+  type: Exclude<ServerType, 'none'>
+  name: string
+  host: string
+  port: string
+  username: string
+  password: string
+  sftpServer: string
+}
+
 export type DbClientType =
   | 'toad'
   | 'dbeaver'
@@ -44,12 +55,14 @@ export interface CredentialEntry {
   dbCommandTemplate: string
   dbOpenInTerminal: boolean
 
-  serverType: ServerType
-  serverHost: string
-  serverPort: string
-  serverUsername: string
-  serverPassword: string
-  serverSftpServer: string
+  servers: ServerEntry[]
+  // Legacy single-server fields — present only in older vaults; migrated to servers[] on load
+  serverType?: ServerType
+  serverHost?: string
+  serverPort?: string
+  serverUsername?: string
+  serverPassword?: string
+  serverSftpServer?: string
 
   notes: string
   createdAt: number

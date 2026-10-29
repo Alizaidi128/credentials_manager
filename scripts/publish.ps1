@@ -19,6 +19,7 @@ Write-Host "  Done."
 
 Write-Host "Building installer..."
 Set-Location $root
+$env:GH_TOKEN = $Token   # lets electron-builder embed the token in app-update.yml
 npm run release
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 

@@ -70,6 +70,23 @@ function migrateEntry(raw: Record<string, unknown>): CredentialEntry {
       password: (raw.appPassword as string | undefined) ?? ''
     }] as AppEntry[] : []
   }
+  if (!Array.isArray(raw.servers)) {
+    const legacyType = raw.serverType as string | undefined
+    if (legacyType && legacyType !== 'none') {
+      raw.servers = [{
+        id: crypto.randomUUID(),
+        type: legacyType,
+        name: legacyType === 'rdp' ? 'Remote Desktop' : 'SFTP',
+        host: (raw.serverHost as string | undefined) ?? '',
+        port: (raw.serverPort as string | undefined) ?? '',
+        username: (raw.serverUsername as string | undefined) ?? '',
+        password: (raw.serverPassword as string | undefined) ?? '',
+        sftpServer: (raw.serverSftpServer as string | undefined) ?? ''
+      }]
+    } else {
+      raw.servers = []
+    }
+  }
   return raw as unknown as CredentialEntry
 }
 

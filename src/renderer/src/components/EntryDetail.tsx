@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AppEntry, CredentialEntry, VpnLogEvent, VpnOtpRequest } from '@shared/types'
+import type { AppEntry, CredentialEntry, ServerEntry, VpnLogEvent, VpnOtpRequest } from '@shared/types'
 import { CopyField } from './CopyField'
 import { DatabaseIcon, GlobeIcon, PencilIcon, PlugIcon, ServerIcon, TrashIcon } from './icons'
 
@@ -7,20 +7,22 @@ interface EntryDetailProps {
   entry: CredentialEntry
   onEdit: () => void
   onDelete: () => void
+  vpnConnected: boolean
+  onVpnConnect: () => void
+  onVpnDisconnect: () => void
 }
 
 type ActionStatus = { kind: 'success' | 'error'; message: string } | null
 
-export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.Element {
+export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, onVpnConnect, onVpnDisconnect }: EntryDetailProps): JSX.Element {
   const [launchingApp, setLaunchingApp] = useState(false)
   const [launchingDb, setLaunchingDb] = useState(false)
-  const [launchingServer, setLaunchingServer] = useState(false)
+  const [launchingServerId, setLaunchingServerId] = useState<string | null>(null)
   const [appStatus, setAppStatus] = useState<ActionStatus>(null)
   const [dbStatus, setDbStatus] = useState<ActionStatus>(null)
   const [serverStatus, setServerStatus] = useState<ActionStatus>(null)
   const [vpnLog, setVpnLog] = useState<string[]>([])
   const [showLog, setShowLog] = useState(false)
-  const [vpnConnected, setVpnConnected] = useState(false)
   const [otpRequest, setOtpRequest] = useState<VpnOtpRequest | null>(null)
   const [otpValue, setOtpValue] = useState('')
   const requestIdRef = useRef<string | null>(null)
@@ -33,8 +35,7 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
     setShowLog(false)
     setLaunchingApp(false)
     setLaunchingDb(false)
-    setLaunchingServer(false)
-    setVpnConnected(false)
+    setLaunchingServerId(null)
   }, [entry.id])
 
   useEffect(() => {
@@ -91,7 +92,7 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
       setAppStatus({ kind: 'error', message: result.message })
       return
     }
-    setVpnConnected(true)
+    onVpnConnect()
     setAppStatus({ kind: 'success', message: 'VPN connected.' })
   }
 
@@ -99,7 +100,7 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
     setAppStatus(null)
     const result = await window.api.disconnectVpn(entry.vpnType)
     setAppStatus({ kind: result.ok ? 'success' : 'error', message: result.message })
-    setVpnConnected(false)
+    onVpnDisconnect()
   }
 
   async function handleLaunchDb(): Promise<void> {
@@ -126,7 +127,7 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
     setLaunchingDb(false)
   }
 
-  async function handleConnectServer(): Promise<void> {
+  async function handleConnectServer(srv: ServerEntry): Promise<void> {
     setServerStatus(null)
 
     if (entry.vpnType !== 'none' && !vpnConnected) {
@@ -134,20 +135,17 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
       return
     }
 
-    const serverType = entry.serverType ?? 'none'
-    if (serverType === 'none') return
-
-    setLaunchingServer(true)
+    setLaunchingServerId(srv.id)
     const result = await window.api.launchServer({
-      serverType,
-      host: entry.serverHost,
-      port: entry.serverPort,
-      username: entry.serverUsername,
-      password: entry.serverPassword,
-      sftpServer: entry.serverSftpServer
+      serverType: srv.type,
+      host: srv.host,
+      port: srv.port,
+      username: srv.username,
+      password: srv.password,
+      sftpServer: srv.sftpServer
     })
     setServerStatus({ kind: result.ok ? 'success' : 'error', message: result.message })
-    setLaunchingServer(false)
+    setLaunchingServerId(null)
   }
 
   const hasVpn = entry.vpnType !== 'none'
@@ -271,17 +269,18 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
                 {launchingDb ? 'Launching…' : 'Connect Database'}
               </button>
 
-              {(entry.serverType ?? 'none') !== 'none' && (
+              {entry.servers.map((srv) => (
                 <button
+                  key={srv.id}
                   type="button"
-                  onClick={handleConnectServer}
-                  disabled={launchingServer}
+                  onClick={() => void handleConnectServer(srv)}
+                  disabled={launchingServerId === srv.id}
                   className="flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:border-brand-400 hover:text-brand-600 dark:border-border-dark dark:text-slate-300 dark:hover:text-brand-400 disabled:pointer-events-none disabled:opacity-60"
                 >
                   <ServerIcon className="h-4 w-4" />
-                  {launchingServer ? 'Connecting…' : entry.serverType === 'winscp' ? 'Connect WinSCP' : 'Connect RDP'}
+                  {launchingServerId === srv.id ? 'Connecting…' : (srv.name.trim() || (srv.type === 'winscp' ? 'Connect WinSCP' : 'Connect RDP'))}
                 </button>
-              )}
+              ))}
             </div>
 
             {appStatus && (
@@ -365,21 +364,35 @@ export function EntryDetail({ entry, onEdit, onDelete }: EntryDetailProps): JSX.
             </section>
           )}
 
-          {(entry.serverType ?? 'none') !== 'none' && (
+          {entry.servers.length > 0 && (
             <section className="rounded-2xl border border-border bg-surface p-5 shadow-card dark:border-border-dark dark:bg-surface-dark dark:shadow-card-dark">
               <h3 className="mb-4 text-xs font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
-                Server — {entry.serverType === 'winscp' ? 'Linux / SFTP (WinSCP)' : 'Windows (Remote Desktop)'}
+                Servers
               </h3>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <CopyField label="Host" value={entry.serverHost} monospace />
-                <CopyField label="Port" value={entry.serverPort} monospace />
-                <CopyField label="Username" value={entry.serverUsername} monospace />
-                <CopyField label="Password" value={entry.serverPassword} secret monospace />
-                {entry.serverType === 'winscp' && entry.serverSftpServer && (
-                  <div className="sm:col-span-2">
-                    <CopyField label="SFTP Server" value={entry.serverSftpServer} monospace />
+              <div className="space-y-4">
+                {entry.servers.map((srv, idx) => (
+                  <div key={srv.id} className="rounded-xl border border-border bg-panel/50 p-4 dark:border-border-dark dark:bg-panel-dark/50">
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                        {srv.name || `Server ${idx + 1}`}
+                      </span>
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                        {srv.type === 'winscp' ? 'WinSCP' : 'RDP'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <CopyField label="Host" value={srv.host} monospace />
+                      <CopyField label="Port" value={srv.port} monospace />
+                      <CopyField label="Username" value={srv.username} monospace />
+                      <CopyField label="Password" value={srv.password} secret monospace />
+                      {srv.type === 'winscp' && srv.sftpServer && (
+                        <div className="sm:col-span-2">
+                          <CopyField label="SFTP Server" value={srv.sftpServer} monospace />
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
+                ))}
               </div>
             </section>
           )}

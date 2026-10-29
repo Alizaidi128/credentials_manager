@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react'
-import type { AppEntry, CredentialEntry, DbClientType, ServerType, VpnType } from '@shared/types'
+import type { AppEntry, CredentialEntry, DbClientType, ServerEntry, ServerType, VpnType } from '@shared/types'
 import { EyeIcon, EyeOffIcon } from './icons'
 
 interface EntryModalProps {
@@ -14,6 +14,10 @@ function newApp(): AppEntry {
   return { id: crypto.randomUUID(), name: '', url: '', username: '', password: '' }
 }
 
+function newServer(): ServerEntry {
+  return { id: crypto.randomUUID(), type: 'rdp', name: '', host: '', port: '3389', username: '', password: '', sftpServer: '' }
+}
+
 const emptyForm: FormState = {
   appName: '',
 
@@ -26,12 +30,7 @@ const emptyForm: FormState = {
 
   apps: [newApp()],
 
-  serverType: 'none',
-  serverHost: '',
-  serverPort: '',
-  serverUsername: '',
-  serverPassword: '',
-  serverSftpServer: '',
+  servers: [],
 
   dbClient: 'custom',
   dbHost: '',
@@ -369,82 +368,82 @@ export function EntryModal({ initial, onCancel, onSave }: EntryModalProps): JSX.
             </div>
           </Section>
 
-          <Section title="Server">
-            <div>
-              <label className={labelClass()}>Server Type</label>
-              <select
-                value={form.serverType}
-                onChange={(e) => {
-                  const t = e.target.value as ServerType
-                  setForm((prev) => ({
-                    ...prev,
-                    serverType: t,
-                    serverPort: prev.serverPort || SERVER_DEFAULT_PORT[t]
-                  }))
-                }}
-                className={inputClass()}
-              >
-                {(Object.keys(SERVER_TYPE_LABELS) as ServerType[]).map((type) => (
-                  <option key={type} value={type}>
-                    {SERVER_TYPE_LABELS[type]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {form.serverType !== 'none' && (
-              <>
-                <div>
-                  <label className={labelClass()}>Host</label>
-                  <input
-                    value={form.serverHost}
-                    onChange={(e) => update('serverHost', e.target.value)}
-                    placeholder="192.168.1.100"
-                    className={inputClass('font-mono')}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass()}>Port</label>
-                  <input
-                    value={form.serverPort}
-                    onChange={(e) => update('serverPort', e.target.value)}
-                    placeholder={SERVER_DEFAULT_PORT[form.serverType]}
-                    className={inputClass('font-mono')}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass()}>Username</label>
-                  <input
-                    value={form.serverUsername}
-                    onChange={(e) => update('serverUsername', e.target.value)}
-                    className={inputClass()}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass()}>Password</label>
-                  <SecretInput
-                    fieldKey="serverPassword"
-                    value={form.serverPassword}
-                    onChange={(v) => update('serverPassword', v)}
-                    revealed={revealed}
-                    onToggleReveal={(k) => setRevealed((p) => ({ ...p, [k]: !p[k] }))}
-                  />
-                </div>
-                {form.serverType === 'winscp' && (
-                  <div className="sm:col-span-2">
-                    <label className={labelClass()}>SFTP Server (optional)</label>
-                    <input
-                      value={form.serverSftpServer}
-                      onChange={(e) => update('serverSftpServer', e.target.value)}
-                      placeholder="sudo /usr/libexec/openssh/sftp-server"
-                      className={inputClass('font-mono')}
-                    />
-                    <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
-                      Override WinSCP's SFTP server path. Leave blank for default.
-                    </p>
+          <Section title="Servers">
+            {form.servers.map((srv, idx) => {
+              function updateSrv(field: keyof Omit<ServerEntry, 'id' | 'type'>, val: string): void {
+                update('servers', form.servers.map((s, i) => i === idx ? { ...s, [field]: val } : s))
+              }
+              return (
+                <div key={srv.id} className="sm:col-span-2 rounded-xl border border-border p-3 dark:border-border-dark">
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
+                      Server {idx + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => update('servers', form.servers.filter((_, i) => i !== idx))}
+                      className="text-xs text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400"
+                    >
+                      Remove
+                    </button>
                   </div>
-                )}
-              </>
-            )}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className={labelClass()}>Name</label>
+                      <input value={srv.name} onChange={(e) => updateSrv('name', e.target.value)} placeholder="e.g. Production" className={inputClass()} />
+                    </div>
+                    <div>
+                      <label className={labelClass()}>Type</label>
+                      <select value={srv.type} onChange={(e) => {
+                        const t = e.target.value as Exclude<ServerType, 'none'>
+                        update('servers', form.servers.map((s, i) => i === idx ? { ...s, type: t, port: s.port || SERVER_DEFAULT_PORT[t] } : s))
+                      }} className={inputClass()}>
+                        <option value="rdp">Windows (Remote Desktop)</option>
+                        <option value="winscp">Linux / SFTP (WinSCP)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelClass()}>Host</label>
+                      <input value={srv.host} onChange={(e) => updateSrv('host', e.target.value)} placeholder="192.168.1.100" className={inputClass('font-mono')} />
+                    </div>
+                    <div>
+                      <label className={labelClass()}>Port</label>
+                      <input value={srv.port} onChange={(e) => updateSrv('port', e.target.value)} placeholder={SERVER_DEFAULT_PORT[srv.type]} className={inputClass('font-mono')} />
+                    </div>
+                    <div>
+                      <label className={labelClass()}>Username</label>
+                      <input value={srv.username} onChange={(e) => updateSrv('username', e.target.value)} className={inputClass()} />
+                    </div>
+                    <div>
+                      <label className={labelClass()}>Password</label>
+                      <SecretInput
+                        fieldKey={`srvPassword-${srv.id}`}
+                        value={srv.password}
+                        onChange={(v) => updateSrv('password', v)}
+                        revealed={revealed}
+                        onToggleReveal={(k) => setRevealed((p) => ({ ...p, [k]: !p[k] }))}
+                      />
+                    </div>
+                    {srv.type === 'winscp' && (
+                      <div className="sm:col-span-2">
+                        <label className={labelClass()}>SFTP Server (optional)</label>
+                        <input value={srv.sftpServer} onChange={(e) => updateSrv('sftpServer', e.target.value)} placeholder="sudo /usr/libexec/openssh/sftp-server" className={inputClass('font-mono')} />
+                        <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">Override WinSCP's SFTP server path. Leave blank for default.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+            <div className="sm:col-span-2">
+              <button
+                type="button"
+                onClick={() => update('servers', [...form.servers, newServer()])}
+                className="w-full rounded-lg border border-dashed border-border py-2 text-sm text-slate-500 transition hover:border-brand-400 hover:text-brand-600 dark:border-border-dark dark:text-slate-400 dark:hover:text-brand-400"
+              >
+                + Add server
+              </button>
+            </div>
           </Section>
 
           <Section title="Database">

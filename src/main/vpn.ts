@@ -544,31 +544,29 @@ export function disconnectCheckpoint(tracPath: string): Promise<VpnConnectResult
 
 let openConnectChild: ChildProcessWithoutNullStreams | null = null
 
-// Apply VPN routes and DNS from Vaultier's own process rather than relying on
-// OpenConnect's --script mechanism, which fails (ERROR_INVALID_FUNCTION) on
-// this machine regardless of whether cscript.exe or powershell.exe is used.
-// We parse route/DNS lines from OpenConnect's output and then spawn PowerShell
-// directly — no intermediate script file, no file-type-association dependency.
-function applyVpnRoutes(
+// Apply VPN routes and DNS using the Wintun interface index OpenConnect reported.
+// Using the explicit index avoids a Get-NetAdapter lookup race: the adapter is
+// guaranteed to exist once OpenConnect logs "Using Wintun device '...', index N".
+function applyVpnRoutesAtIndex(
   routes: { addr: string; mask: string }[],
   dnsServers: string[],
+  ifIndex: number,
   emit: (l: string) => void,
   onDone: () => void
 ): void {
   if (routes.length === 0 && dnsServers.length === 0) { onDone(); return }
 
   const routeCmds = routes
-    .map(r => `& route add ${r.addr} MASK ${r.mask} 0.0.0.0 IF $idx 2>$null`)
+    .map(r => `& route add ${r.addr} MASK ${r.mask} 0.0.0.0 IF ${ifIndex} 2>$null`)
     .join('; ')
   const dnsCmd = dnsServers.length > 0
-    ? `Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses @('${dnsServers.join("','")}') -ErrorAction SilentlyContinue`
+    ? `Set-DnsClientServerAddress -InterfaceIndex ${ifIndex} -ServerAddresses @('${dnsServers.join("','")}') -ErrorAction SilentlyContinue`
     : ''
-  const body = [routeCmds, dnsCmd].filter(Boolean).join('; ')
-  const psCmd = `$iface = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like '*Wintun*' } | Select-Object -First 1; if ($iface) { $idx = $iface.InterfaceIndex; ${body} }`
+  const cmd = [routeCmds, dnsCmd].filter(Boolean).join('; ')
 
-  emit(`Applying ${routes.length} VPN routes via PowerShell...`)
+  emit(`Applying ${routes.length} VPN routes (IF ${ifIndex}) via PowerShell...`)
   const ps = spawn('powershell.exe', [
-    '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-Command', psCmd
+    '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-Command', cmd
   ], { windowsHide: true }) as ChildProcessWithoutNullStreams
   ps.stdout?.on('data', (c: Buffer) => c.toString('utf8').split(/\r?\n/).forEach(emit))
   ps.stderr?.on('data', (c: Buffer) => c.toString('utf8').split(/\r?\n/).forEach(emit))
@@ -656,6 +654,13 @@ export async function connectOpenConnect(
       openconnectPath,
       [
         '--protocol=fortinet',
+        // No --script: OpenConnect uses vpnc-script-win.js via the registry file
+        // association (ShellExecute path), which exits 0 and lets PPP start.
+        // Explicit --script=cmd.exe or cscript.exe fail with ERROR_INVALID_FUNCTION
+        // because Electron's CreateProcess restrictions block them — and a non-zero
+        // script exit prevents OpenConnect from entering the PPP loop.
+        // We also apply routes ourselves (applyVpnRoutesAtIndex below) so that VPN
+        // subnets are routed even if the system's vpnc-script misses some.
         `--user=${request.username}`,
         '--passwd-on-stdin',
         ...certArgs,
@@ -688,14 +693,22 @@ export async function connectOpenConnect(
       }
 
       const lower = text.toLowerCase()
-      if (
-        !routesApplied &&
-        /tunnel connected|esp tunnel connected|connected tun|established dtls|using wintun device|configured as \d+\.\d+\.\d+\.\d+|session authentication will expire/.test(lower)
-      ) {
+      // Trigger route application only after OpenConnect confirms the Wintun
+      // adapter exists and reports its interface index. Triggering earlier
+      // (e.g. on "Established DTLS") races with adapter creation — Get-NetAdapter
+      // finds nothing and no routes are added, causing a false "connected" state.
+      const wintunLine = text.match(/using wintun device [^,]+, index (\d+)/i)
+      if (!routesApplied && wintunLine) {
         routesApplied = true
-        applyVpnRoutes(routes, dnsServers, emit, () => {
+        const ifIndex = parseInt(wintunLine[1], 10)
+        applyVpnRoutesAtIndex(routes, dnsServers, ifIndex, emit, () => {
           finish(true, 'OpenConnect SSL VPN connected.')
         })
+      } else if (!routesApplied && /tunnel connected|esp tunnel connected|connected tun/.test(lower)) {
+        // Fallback for non-Wintun (TAP) connections that don't report an index.
+        // Routes aren't applied — TAP drivers configure the interface themselves.
+        routesApplied = true
+        finish(true, 'OpenConnect SSL VPN connected.')
       } else if (/authentication failure|login failed|no such host|connection refused|failed to open https/.test(lower)) {
         finish(false, text.split(/\r?\n/).filter((l) => l.trim()).pop() ?? 'OpenConnect connection failed.')
       }
