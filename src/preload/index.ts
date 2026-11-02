@@ -12,6 +12,7 @@ import type {
   UnlockResult,
   VpnConnectRequest,
   VpnConnectResult,
+  VpnDroppedEvent,
   VpnLogEvent,
   VpnOtpRequest,
   VpnType
@@ -41,6 +42,11 @@ const api = {
     const listener = (_event: unknown, data: VpnLogEvent): void => callback(data)
     ipcRenderer.on('vpn:log', listener)
     return () => ipcRenderer.removeListener('vpn:log', listener)
+  },
+  onVpnDropped: (callback: (event: VpnDroppedEvent) => void): (() => void) => {
+    const listener = (_event: unknown, data: VpnDroppedEvent): void => callback(data)
+    ipcRenderer.on('vpn:dropped', listener)
+    return () => ipcRenderer.removeListener('vpn:dropped', listener)
   },
   onVpnOtpRequired: (callback: (req: VpnOtpRequest) => void): (() => void) => {
     const listener = (_event: unknown, data: VpnOtpRequest): void => callback(data)

@@ -145,6 +145,11 @@ export interface VpnLogEvent {
   line: string
 }
 
+export interface VpnDroppedEvent {
+  requestId: string
+  message: string
+}
+
 export interface DbLaunchRequest {
   dbClient: DbClientType
   commandTemplate: string

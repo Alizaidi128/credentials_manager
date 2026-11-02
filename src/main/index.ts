@@ -266,7 +266,9 @@ function registerIpcHandlers(): void {
         return vpn.connectCheckpoint(appSettings.checkpointPath, request, onLog, onOtpRequired)
       }
       case 'openconnect':
-        return vpn.connectOpenConnect(appSettings.openconnectPath, request, onLog)
+        return vpn.connectOpenConnect(appSettings.openconnectPath, request, onLog, (dropped) => {
+          mainWindow?.webContents.send('vpn:dropped', dropped)
+        })
       default:
         return { ok: false, message: `Unsupported VPN type: ${request.vpnType}` }
     }
@@ -418,6 +420,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  void vpn.disconnectOpenConnect()
 })
 
 app.on('window-all-closed', () => {

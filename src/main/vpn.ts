@@ -1,11 +1,13 @@
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process'
+import { writeFileSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
-import type { VpnConnectRequest, VpnConnectResult, VpnLogEvent } from '../shared/types'
+import type { VpnConnectRequest, VpnConnectResult, VpnDroppedEvent, VpnLogEvent } from '../shared/types'
 
 const CONNECT_TIMEOUT_MS = 30000
 
 type LogSink = (event: VpnLogEvent) => void
+type DroppedSink = (event: VpnDroppedEvent) => void
 
 /** Only one connect attempt (and one live tunnel) is tracked at a time —
  * the Cisco CLI itself only supports a single active session per machine. */
@@ -543,38 +545,139 @@ export function disconnectCheckpoint(tracPath: string): Promise<VpnConnectResult
 //   • App must run as Administrator (TAP interface creation requires it)
 
 let openConnectChild: ChildProcessWithoutNullStreams | null = null
+let openConnectBusy = false
+const intentionalStops = new WeakSet<ChildProcessWithoutNullStreams>()
 
-// Apply VPN routes and DNS using the Wintun interface index OpenConnect reported.
-// Using the explicit index avoids a Get-NetAdapter lookup race: the adapter is
-// guaranteed to exist once OpenConnect logs "Using Wintun device '...', index N".
-function applyVpnRoutesAtIndex(
-  routes: { addr: string; mask: string }[],
-  dnsServers: string[],
+const OPENCONNECT_MAX_ATTEMPTS = 3
+const OPENCONNECT_ATTEMPT_TIMEOUT_MS = 90000
+
+interface TunnelInfo {
+  ip: string
+  mtu: number | null
+  routes: { addr: string; mask: string }[]
+  dns: string[]
+}
+
+interface AttemptResult {
+  ok: boolean
+  message: string
+  retryable: boolean
+}
+
+// OpenConnect runs its --script as `cscript.exe "<script>"` and BLOCKS until it
+// exits; PPP negotiation with the FortiGate only starts afterwards. The stock
+// vpnc-script-win.js shells out once per route (netsh/route via WSH, ~0.3 s each),
+// which takes 10+ s with ~30 routes. The gateway gives up on a silent client after
+// roughly 18 s and closes the tunnel — the "connects only sometimes" failure.
+// So OpenConnect gets an instant no-op script, and the adapter is configured
+// here in parallel (configureTunnel), outside OpenConnect's critical path.
+function ensureNoopScript(): string {
+  const path = join(app.getPath('userData'), 'vaultier-noop.js')
+  writeFileSync(path, 'WScript.Quit(0);\r\n', 'utf8')
+  return path
+}
+
+// Mirrors what vpnc-script-win.js does for "connect" with split-include routes:
+// MTU, IPv4 address on the adapter, DNS, and one route per network via the
+// tunnel address. Verifies the address really landed before reporting success.
+function buildTunnelScript(ifIndex: number, info: TunnelInfo): string {
+  const lines = [
+    `$ErrorActionPreference = 'SilentlyContinue'`,
+    `$idx = ${ifIndex}`,
+    `$ip = '${info.ip}'`
+  ]
+  if (info.mtu) {
+    lines.push(`netsh interface ipv4 set subinterface $idx mtu=${info.mtu} store=active 2>&1 | Out-Null`)
+  }
+  lines.push(`netsh interface ip set address $idx static $ip 255.255.255.255 store=active 2>&1 | Out-Null`)
+  if (info.dns.length > 0) {
+    const servers = info.dns.map((d) => `'${d}'`).join(',')
+    lines.push(`Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses @(${servers})`)
+  }
+  for (const r of info.routes) {
+    lines.push(`route add ${r.addr} mask ${r.mask} $ip if $idx 2>&1 | Out-Null`)
+  }
+  lines.push(
+    `$ok = [bool](Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 | Where-Object { $_.IPAddress -eq $ip })`,
+    `$n = @(Get-NetRoute -InterfaceIndex $idx -AddressFamily IPv4 | Where-Object { $_.NextHop -eq $ip }).Count`,
+    `Write-Output ('VAULTIER_CFG ip=' + $(if ($ok) { 'OK' } else { 'MISSING' }) + ' routes=' + $n)`
+  )
+  return lines.join('\n')
+}
+
+function spawnPowerShellFile(fileName: string, script: string, captureOutput: boolean): ReturnType<typeof spawn> {
+  const file = join(app.getPath('userData'), fileName)
+  writeFileSync(file, script, 'utf8')
+  return spawn(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file],
+    { windowsHide: true, stdio: captureOutput ? ['ignore', 'pipe', 'ignore'] : 'ignore' }
+  )
+}
+
+function configureTunnel(
   ifIndex: number,
-  emit: (l: string) => void,
-  onDone: () => void
-): void {
-  if (routes.length === 0 && dnsServers.length === 0) { onDone(); return }
-
-  const routeCmds = routes
-    .map(r => `& route add ${r.addr} MASK ${r.mask} 0.0.0.0 IF ${ifIndex} 2>$null`)
-    .join('; ')
-  const dnsCmd = dnsServers.length > 0
-    ? `Set-DnsClientServerAddress -InterfaceIndex ${ifIndex} -ServerAddresses @('${dnsServers.join("','")}') -ErrorAction SilentlyContinue`
-    : ''
-  const cmd = [routeCmds, dnsCmd].filter(Boolean).join('; ')
-
-  emit(`Applying ${routes.length} VPN routes (IF ${ifIndex}) via PowerShell...`)
-  const ps = spawn('powershell.exe', [
-    '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-Command', cmd
-  ], { windowsHide: true }) as ChildProcessWithoutNullStreams
-  ps.stdout?.on('data', (c: Buffer) => c.toString('utf8').split(/\r?\n/).forEach(emit))
-  ps.stderr?.on('data', (c: Buffer) => c.toString('utf8').split(/\r?\n/).forEach(emit))
-  ps.on('error', (err) => { emit(`Route setup warning: ${err.message}`); onDone() })
-  ps.on('exit', (code) => {
-    emit(code === 0 ? 'VPN routes configured.' : `Route setup exited with code ${code}`)
-    onDone()
+  info: TunnelInfo,
+  emit: (l: string) => void
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    emit(`Configuring VPN adapter (index ${ifIndex}): ${info.ip}, ${info.routes.length} routes, ${info.dns.length} DNS servers...`)
+    let ps: ReturnType<typeof spawn>
+    try {
+      ps = spawnPowerShellFile('vaultier-tunnel.ps1', buildTunnelScript(ifIndex, info), true)
+    } catch (err) {
+      emit(`Adapter setup failed to start: ${err instanceof Error ? err.message : String(err)}`)
+      resolve(false)
+      return
+    }
+    let out = ''
+    const timer = setTimeout(() => ps.kill(), 30000)
+    ps.stdout?.on('data', (c: Buffer) => { out += c.toString('utf8') })
+    ps.on('error', (err) => {
+      clearTimeout(timer)
+      emit(`Adapter setup failed to start: ${err.message}`)
+      resolve(false)
+    })
+    ps.on('exit', () => {
+      clearTimeout(timer)
+      const m = out.match(/VAULTIER_CFG ip=(OK|MISSING) routes=(\d+)/)
+      if (!m) {
+        emit('Adapter setup did not report a result.')
+        resolve(false)
+        return
+      }
+      const routeCount = parseInt(m[2], 10)
+      if (m[1] !== 'OK') {
+        emit('Adapter setup failed: the VPN address was not applied to the adapter.')
+        resolve(false)
+        return
+      }
+      if (routeCount < info.routes.length) {
+        emit(`Warning: only ${routeCount} of ${info.routes.length} routes were installed.`)
+      } else {
+        emit(`VPN adapter ready: ${info.ip}, ${routeCount} routes.`)
+      }
+      resolve(true)
+    })
   })
+}
+
+// A killed OpenConnect cannot remove its Wintun adapter, which would leave stale
+// routes pointing at a dead interface. Only touches an adapter that is Wintun.
+function cleanupTunnel(ifIndex: number): void {
+  const script = [
+    `$ErrorActionPreference = 'SilentlyContinue'`,
+    `$a = Get-NetAdapter -InterfaceIndex ${ifIndex}`,
+    `if ($a -and $a.InterfaceDescription -like '*Wintun*') {`,
+    `  Get-NetRoute -InterfaceIndex ${ifIndex} -AddressFamily IPv4 | Where-Object { $_.NextHop -ne '0.0.0.0' } | Remove-NetRoute -Confirm:$false`,
+    `  Get-NetIPAddress -InterfaceIndex ${ifIndex} -AddressFamily IPv4 | Remove-NetIPAddress -Confirm:$false`,
+    `}`
+  ].join('\n')
+  try {
+    spawnPowerShellFile('vaultier-cleanup.ps1', script, false).on('error', () => undefined)
+  } catch {
+    // best effort — Windows removes the orphaned adapter on the next connect anyway
+  }
 }
 
 // Probe the server with a dummy --servercert pin. OpenConnect will fail but
@@ -610,57 +713,31 @@ function probeServerCertPin(
   })
 }
 
-export async function connectOpenConnect(
+function runOpenConnectAttempt(
   openconnectPath: string,
   request: VpnConnectRequest,
-  onLog: LogSink
-): Promise<VpnConnectResult> {
-  if (openConnectChild) {
-    return { ok: false, message: 'An OpenConnect VPN session is already active.' }
-  }
-
-  function emit(line: string): void {
-    if (line.trim()) onLog({ requestId: request.requestId, line })
-  }
-
-  const server = request.port?.trim() ? `${request.host}:${request.port.trim()}` : request.host
-
-  emit('Probing server certificate...')
-  const certPin = await probeServerCertPin(openconnectPath, server, emit)
-
+  server: string,
+  certArgs: string[],
+  scriptPath: string,
+  emit: (l: string) => void,
+  onDropped: DroppedSink
+): Promise<AttemptResult> {
   return new Promise((resolve) => {
+    const info: TunnelInfo = { ip: '', mtu: null, routes: [], dns: [] }
     let settled = false
-
-    function finish(ok: boolean, message: string): void {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      if (!ok && openConnectChild) {
-        openConnectChild.kill()
-        openConnectChild = null
-      }
-      resolve({ ok, message })
-    }
-
-    const certArgs = certPin ? [`--servercert=${certPin}`] : []
-
-    // Collect routes and DNS from OpenConnect's output so we can apply them
-    // ourselves after connection — bypassing the broken --script spawn mechanism.
-    const routes: { addr: string; mask: string }[] = []
-    const dnsServers: string[] = []
-    let routesApplied = false
+    let connected = false
+    let tunnelUp = false
+    let configuring = false
+    let ifIndex: number | null = null
+    let lastLine = ''
+    let heartbeatNoted = false
+    let lastWasHeartbeat = false
 
     const child = spawn(
       openconnectPath,
       [
         '--protocol=fortinet',
-        // No --script: OpenConnect uses vpnc-script-win.js via the registry file
-        // association (ShellExecute path), which exits 0 and lets PPP start.
-        // Explicit --script=cmd.exe or cscript.exe fail with ERROR_INVALID_FUNCTION
-        // because Electron's CreateProcess restrictions block them — and a non-zero
-        // script exit prevents OpenConnect from entering the PPP loop.
-        // We also apply routes ourselves (applyVpnRoutesAtIndex below) so that VPN
-        // subnets are routed even if the system's vpnc-script misses some.
+        `--script=${scriptPath}`,
         `--user=${request.username}`,
         '--passwd-on-stdin',
         ...certArgs,
@@ -670,71 +747,188 @@ export async function connectOpenConnect(
     ) as ChildProcessWithoutNullStreams
     openConnectChild = child
 
-    child.stdin.write(`${request.password}\n`)
+    function settle(result: AttemptResult): void {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      resolve(result)
+    }
+
+    function stopChild(): void {
+      intentionalStops.add(child)
+      if (openConnectChild === child) openConnectChild = null
+      child.kill()
+    }
 
     const timeout = setTimeout(() => {
-      finish(false, 'Timed out waiting for OpenConnect to connect.')
-    }, 90000)
-
-    function handleChunk(chunk: Buffer): void {
-      const text = chunk.toString('utf8')
-      text.split(/\r?\n/).forEach(emit)
       if (settled) return
+      stopChild()
+      settle({ ok: false, message: 'Timed out waiting for OpenConnect to connect.', retryable: false })
+    }, OPENCONNECT_ATTEMPT_TIMEOUT_MS)
 
-      // Parse routes: "Got IPv4 route A.B.C.D/W.X.Y.Z"
-      const routeRe = /Got IPv4 route (\d+\.\d+\.\d+\.\d+)\/(\d+\.\d+\.\d+\.\d+)/g
-      let m: RegExpExecArray | null
-      while ((m = routeRe.exec(text)) !== null) routes.push({ addr: m[1], mask: m[2] })
-
-      // Parse DNS: "Got IPv4 DNS server A.B.C.D"
-      const dnsRe = /Got IPv4 DNS server (\d+\.\d+\.\d+\.\d+)/g
-      while ((m = dnsRe.exec(text)) !== null) {
-        if (!dnsServers.includes(m[1])) dnsServers.push(m[1])
+    function startConfigure(): void {
+      if (configuring || ifIndex === null) return
+      configuring = true
+      if (!info.ip) {
+        stopChild()
+        settle({ ok: false, message: 'OpenConnect did not report a VPN address.', retryable: true })
+        return
       }
+      void configureTunnel(ifIndex, info, emit).then((ok) => {
+        if (settled) return
+        if (!ok) {
+          stopChild()
+          settle({ ok: false, message: 'Could not configure the VPN adapter.', retryable: true })
+          return
+        }
+        connected = true
+        settle({ ok: true, message: 'OpenConnect SSL VPN connected.', retryable: false })
+      })
+    }
 
-      const lower = text.toLowerCase()
-      // Trigger route application only after OpenConnect confirms the Wintun
-      // adapter exists and reports its interface index. Triggering earlier
-      // (e.g. on "Established DTLS") races with adapter creation — Get-NetAdapter
-      // finds nothing and no routes are added, causing a false "connected" state.
-      const wintunLine = text.match(/using wintun device [^,]+, index (\d+)/i)
-      if (!routesApplied && wintunLine) {
-        routesApplied = true
-        const ifIndex = parseInt(wintunLine[1], 10)
-        applyVpnRoutesAtIndex(routes, dnsServers, ifIndex, emit, () => {
-          finish(true, 'OpenConnect SSL VPN connected.')
-        })
-      } else if (!routesApplied && /tunnel connected|esp tunnel connected|connected tun/.test(lower)) {
-        // Fallback for non-Wintun (TAP) connections that don't report an index.
-        // Routes aren't applied — TAP drivers configure the interface themselves.
-        routesApplied = true
-        finish(true, 'OpenConnect SSL VPN connected.')
-      } else if (/authentication failure|login failed|no such host|connection refused|failed to open https/.test(lower)) {
-        finish(false, text.split(/\r?\n/).filter((l) => l.trim()).pop() ?? 'OpenConnect connection failed.')
+    function onLine(raw: string): void {
+      const line = raw.trimEnd()
+      if (!line.trim()) return
+
+      // FortiGate sends GFtype heartbeat frames that OpenConnect logs as
+      // "Unexpected pre-PPP packet header" plus a hex dump. They are log noise
+      // on a healthy tunnel, so show the first one and hide the repeats.
+      if (/^Unexpected pre-PPP packet header/i.test(line)) {
+        lastWasHeartbeat = true
+        if (!heartbeatNoted) {
+          heartbeatNoted = true
+          emit('FortiGate heartbeat packet received (OpenConnect ignores these). Further ones are hidden.')
+        }
+        return
+      }
+      if (lastWasHeartbeat && /^[<>]\s+[0-9a-f]{4}:/i.test(line)) return
+      lastWasHeartbeat = false
+
+      emit(line)
+      lastLine = line
+
+      let m: RegExpMatchArray | null
+      if ((m = line.match(/Got Legacy IP address (\d+\.\d+\.\d+\.\d+)/))) {
+        info.ip = m[1]
+      } else if ((m = line.match(/Got IPv4 route (\d+\.\d+\.\d+\.\d+)\/(\d+\.\d+\.\d+\.\d+)/))) {
+        const [, addr, mask] = m
+        if (!info.routes.some((r) => r.addr === addr && r.mask === mask)) info.routes.push({ addr, mask })
+      } else if ((m = line.match(/Got IPv4 DNS server (\d+\.\d+\.\d+\.\d+)/))) {
+        if (!info.dns.includes(m[1])) info.dns.push(m[1])
+      } else if ((m = line.match(/Requesting calculated MTU of (\d+)/))) {
+        info.mtu = parseInt(m[1], 10)
+      } else if (/Established DTLS connection|Configured as \d+\.\d+\.\d+\.\d+/i.test(line)) {
+        tunnelUp = true
+      } else if ((m = line.match(/Using Wintun device '[^']*', index (\d+)/i))) {
+        tunnelUp = true
+        ifIndex = parseInt(m[1], 10)
+        startConfigure()
+      } else if (/authentication failure|login failed|no such host|connection refused|failed to open https/i.test(line)) {
+        stopChild()
+        settle({ ok: false, message: line, retryable: false })
       }
     }
 
-    child.stdout?.on('data', handleChunk)
-    child.stderr?.on('data', handleChunk)
+    function attach(stream: NodeJS.ReadableStream | null): void {
+      let buf = ''
+      stream?.on('data', (c: Buffer) => {
+        buf += c.toString('utf8')
+        const parts = buf.split(/\r?\n/)
+        buf = parts.pop() ?? ''
+        parts.forEach(onLine)
+      })
+      stream?.on('end', () => {
+        if (buf) onLine(buf)
+        buf = ''
+      })
+    }
+    attach(child.stdout)
+    attach(child.stderr)
+
+    child.stdin.on('error', () => undefined)
+    child.stdin.write(`${request.password}\n`)
 
     child.on('error', (err) => {
-      finish(false, `Could not start OpenConnect: ${err.message}`)
+      settle({ ok: false, message: `Could not start OpenConnect: ${err.message}`, retryable: false })
     })
 
     child.on('exit', (code) => {
       if (openConnectChild === child) openConnectChild = null
-      if (!settled) {
-        finish(code === 0, code === 0 ? 'OpenConnect exited.' : `OpenConnect exited with code ${code}.`)
+      if (ifIndex !== null) cleanupTunnel(ifIndex)
+      const intentional = intentionalStops.has(child)
+      if (connected) {
+        if (!intentional) {
+          onDropped({
+            requestId: request.requestId,
+            message: `VPN tunnel dropped${lastLine ? `: ${lastLine}` : '.'}`
+          })
+        }
+        return
       }
+      settle({
+        ok: false,
+        message: lastLine || `OpenConnect exited with code ${code}.`,
+        retryable: tunnelUp && !intentional
+      })
     })
   })
 }
 
+export async function connectOpenConnect(
+  openconnectPath: string,
+  request: VpnConnectRequest,
+  onLog: LogSink,
+  onDropped: DroppedSink
+): Promise<VpnConnectResult> {
+  if (openConnectChild || openConnectBusy) {
+    return { ok: false, message: 'An OpenConnect VPN session is already active.' }
+  }
+  openConnectBusy = true
+
+  function emit(line: string): void {
+    if (line.trim()) onLog({ requestId: request.requestId, line })
+  }
+
+  try {
+    const server = request.port?.trim() ? `${request.host}:${request.port.trim()}` : request.host
+
+    let scriptPath: string
+    try {
+      scriptPath = ensureNoopScript()
+    } catch (err) {
+      return {
+        ok: false,
+        message: `Could not prepare OpenConnect script: ${err instanceof Error ? err.message : String(err)}`
+      }
+    }
+
+    emit('Probing server certificate...')
+    const certPin = await probeServerCertPin(openconnectPath, server, emit)
+    const certArgs = certPin ? [`--servercert=${certPin}`] : []
+
+    let result: AttemptResult = { ok: false, message: 'OpenConnect did not start.', retryable: false }
+    for (let attempt = 1; attempt <= OPENCONNECT_MAX_ATTEMPTS; attempt++) {
+      if (attempt > 1) {
+        emit(`Tunnel dropped during setup — retrying (${attempt}/${OPENCONNECT_MAX_ATTEMPTS})...`)
+        await new Promise((r) => setTimeout(r, 1500))
+      }
+      result = await runOpenConnectAttempt(
+        openconnectPath, request, server, certArgs, scriptPath, emit, onDropped
+      )
+      if (result.ok || !result.retryable) break
+    }
+    return { ok: result.ok, message: result.message }
+  } finally {
+    openConnectBusy = false
+  }
+}
+
 export function disconnectOpenConnect(): Promise<VpnConnectResult> {
-  if (!openConnectChild) {
+  const child = openConnectChild
+  if (!child) {
     return Promise.resolve({ ok: true, message: 'No active OpenConnect session.' })
   }
-  const child = openConnectChild
+  intentionalStops.add(child)
   openConnectChild = null
   child.kill()
   return Promise.resolve({ ok: true, message: 'OpenConnect SSL VPN disconnected.' })

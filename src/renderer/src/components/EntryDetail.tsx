@@ -8,13 +8,14 @@ interface EntryDetailProps {
   onEdit: () => void
   onDelete: () => void
   vpnConnected: boolean
-  onVpnConnect: () => void
+  vpnNotice?: string
+  onVpnConnect: (requestId: string) => void
   onVpnDisconnect: () => void
 }
 
 type ActionStatus = { kind: 'success' | 'error'; message: string } | null
 
-export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, onVpnConnect, onVpnDisconnect }: EntryDetailProps): JSX.Element {
+export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, onVpnConnect, onVpnDisconnect }: EntryDetailProps): JSX.Element {
   const [launchingApp, setLaunchingApp] = useState(false)
   const [launchingDb, setLaunchingDb] = useState(false)
   const [launchingServerId, setLaunchingServerId] = useState<string | null>(null)
@@ -37,6 +38,10 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, onVpnConnec
     setLaunchingDb(false)
     setLaunchingServerId(null)
   }, [entry.id])
+
+  useEffect(() => {
+    if (vpnNotice) setAppStatus(null)
+  }, [vpnNotice])
 
   useEffect(() => {
     return window.api.onVpnLog((event: VpnLogEvent) => {
@@ -92,7 +97,7 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, onVpnConnec
       setAppStatus({ kind: 'error', message: result.message })
       return
     }
-    onVpnConnect()
+    onVpnConnect(requestId)
     setAppStatus({ kind: 'success', message: 'VPN connected.' })
   }
 
@@ -283,6 +288,9 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, onVpnConnec
               ))}
             </div>
 
+            {vpnNotice && !vpnConnected && (
+              <p className="mt-3 text-sm text-red-600 dark:text-red-400">{vpnNotice}</p>
+            )}
             {appStatus && (
               <p className={`mt-3 text-sm ${appStatus.kind === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                 {appStatus.message}

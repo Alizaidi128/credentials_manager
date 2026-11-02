@@ -32,7 +32,23 @@ function App(): JSX.Element {
   } | null>(null)
   const [idleTimeoutMs, setIdleTimeoutMs] = useState(0)
   const [pendingUpdate, setPendingUpdate] = useState<{ version: string; downloading?: boolean } | null>(null)
-  const [connectedVpnEntryIds, setConnectedVpnEntryIds] = useState<string[]>([])
+  // entryId -> requestId of the VPN session that entry connected with
+  const [vpnSessions, setVpnSessions] = useState<Record<string, string>>({})
+  const [vpnNotices, setVpnNotices] = useState<Record<string, string>>({})
+  const vpnSessionsRef = useRef(vpnSessions)
+  vpnSessionsRef.current = vpnSessions
+
+  useEffect(() => {
+    return window.api.onVpnDropped(({ requestId, message }) => {
+      const entryId = Object.keys(vpnSessionsRef.current).find((id) => vpnSessionsRef.current[id] === requestId)
+      if (!entryId) return
+      setVpnSessions((prev) => {
+        const { [entryId]: _dropped, ...rest } = prev
+        return rest
+      })
+      setVpnNotices((prev) => ({ ...prev, [entryId]: message }))
+    })
+  }, [])
   const remindTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Stable ref so idle timer always calls the latest handleLock
@@ -221,9 +237,27 @@ function App(): JSX.Element {
             entry={selectedEntry}
             onEdit={() => setModalEntry(selectedEntry)}
             onDelete={() => setPendingDelete(selectedEntry)}
-            vpnConnected={connectedVpnEntryIds.includes(selectedEntry.id)}
-            onVpnConnect={() => setConnectedVpnEntryIds((prev) => prev.includes(selectedEntry.id) ? prev : [...prev, selectedEntry.id])}
-            onVpnDisconnect={() => setConnectedVpnEntryIds((prev) => prev.filter((id) => id !== selectedEntry.id))}
+            vpnConnected={selectedEntry.id in vpnSessions}
+            vpnNotice={vpnNotices[selectedEntry.id]}
+            onVpnConnect={(requestId) => {
+              const entryId = selectedEntry.id
+              setVpnSessions((prev) => ({ ...prev, [entryId]: requestId }))
+              setVpnNotices((prev) => {
+                const { [entryId]: _cleared, ...rest } = prev
+                return rest
+              })
+            }}
+            onVpnDisconnect={() => {
+              const entryId = selectedEntry.id
+              setVpnSessions((prev) => {
+                const { [entryId]: _removed, ...rest } = prev
+                return rest
+              })
+              setVpnNotices((prev) => {
+                const { [entryId]: _cleared, ...rest } = prev
+                return rest
+              })
+            }}
           />
         ) : (
           <EmptyState hasEntries={entries.length > 0} onAdd={() => setModalEntry('new')} />
