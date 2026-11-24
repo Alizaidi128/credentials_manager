@@ -1,19 +1,81 @@
-import { BrowserWindow, clipboard } from 'electron'
+import { appendFileSync } from 'fs'
+import { join } from 'path'
+import { app, BrowserWindow, clipboard, screen } from 'electron'
 
 let helperWin: BrowserWindow | null = null
 
-export function showRdpHelper(host: string, username: string, password: string): void {
-  clipboard.writeText(password)
+export interface HelperField {
+  label: string
+  value: string
+  secret?: boolean
+}
+
+export interface CredentialHelperSpec {
+  title: string
+  subtitle: string
+  fields: HelperField[]
+  /** Index of the field that is put on the clipboard and copied by the main button. */
+  copyIndex: number
+  pasteHint: string
+}
+
+export interface CredentialHelperOptions {
+  title?: string
+  pasteHint?: string
+}
+
+export function showRdpHelper(
+  host: string,
+  username: string,
+  password: string,
+  options: CredentialHelperOptions = {}
+): void {
+  showCredentialHelper({
+    title: options.title ?? 'RDP Credentials',
+    subtitle: host,
+    fields: [
+      { label: 'Username', value: username },
+      { label: 'Password', value: password, secret: true }
+    ],
+    copyIndex: 1,
+    pasteHint: options.pasteHint ?? 'Paste into the Windows Security dialog'
+  })
+}
+
+const esc = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+// JSON that is safe to embed inside an inline <script> (a value containing
+// "</script>" must not be able to end the script block).
+const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c')
+
+export function showCredentialHelper(spec: CredentialHelperSpec): void {
+  const { title, subtitle, fields, pasteHint } = spec
+  if (fields.length === 0) return
+  const copyIndex = Math.min(Math.max(spec.copyIndex, 0), fields.length - 1)
+  const copyLabel = fields[copyIndex].label
+
+  clipboard.writeText(fields[copyIndex].value)
 
   if (helperWin && !helperWin.isDestroyed()) {
     helperWin.close()
   }
 
-  const esc = (s: string): string =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-
-  const pwJson = JSON.stringify(password)
-  const userJson = JSON.stringify(username)
+  const rows = fields
+    .map(
+      (f, i) => `  <div>
+    <div class="field-label">${esc(f.label)}</div>
+    <div class="field-row">
+      <div class="field-val" id="v${i}">${f.secret ? '&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;' : esc(f.value)}</div>${
+        f.secret
+          ? `\n      <button class="icon-btn" title="Show/hide" onclick="toggle(${i})" id="eye${i}">&#128065;</button>`
+          : ''
+      }
+      <button class="icon-btn" title="Copy ${esc(f.label.toLowerCase())}" onclick="copyField(${i})">&#x2398;</button>
+    </div>
+  </div>`
+    )
+    .join('\n')
 
   const html = `<!DOCTYPE html>
 <html>
@@ -21,7 +83,7 @@ export function showRdpHelper(host: string, username: string, password: string):
 <meta charset="utf-8">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; }
+  html, body { height: 100%; overflow: hidden; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background: #1e1b4b;
@@ -50,7 +112,7 @@ export function showRdpHelper(host: string, username: string, password: string):
   .field-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px; }
   .field-row { display: flex; align-items: center; gap: 6px; }
   .field-val {
-    flex: 1; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1);
+    flex: 1; min-width: 0; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1);
     border-radius: 6px; padding: 6px 10px; font-family: monospace; font-size: 12px;
     color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
@@ -76,78 +138,168 @@ export function showRdpHelper(host: string, username: string, password: string):
 <body>
 <div class="header">
   <div>
-    <div class="title">RDP Credentials</div>
-    <div class="host">${esc(host)}</div>
+    <div class="title">${esc(title)}</div>
+    <div class="host">${esc(subtitle)}</div>
   </div>
   <button class="close-btn" onclick="window.close()">&#x2715;</button>
 </div>
 <div class="body">
-  <div>
-    <div class="field-label">Username</div>
-    <div class="field-row">
-      <div class="field-val" id="uval">${esc(username)}</div>
-      <button class="icon-btn" title="Copy username" onclick="copyField('user')">&#x2398;</button>
-    </div>
-  </div>
-  <div>
-    <div class="field-label">Password</div>
-    <div class="field-row">
-      <div class="field-val" id="pval">&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;</div>
-      <button class="icon-btn" title="Show/hide" onclick="togglePw()" id="eyeBtn">&#128065;</button>
-      <button class="icon-btn" title="Copy password" onclick="copyField('pw')">&#x2398;</button>
-    </div>
-  </div>
-  <button class="copy-btn" id="mainBtn" onclick="copyPw()">&#x2398;&nbsp; Copy Password</button>
-  <div class="hint" id="hint">Password auto-copied to clipboard</div>
+${rows}
+  <button class="copy-btn" id="mainBtn" onclick="copyMain()">&#x2398;&nbsp; Copy ${esc(copyLabel)}</button>
+  <div class="hint" id="hint">${esc(copyLabel)} auto-copied to clipboard</div>
 </div>
 <script>
-  const pw = ${pwJson};
-  const user = ${userJson};
-  let pwVisible = false;
+  const fields = ${scriptJson(fields.map((f) => ({ v: f.value, s: !!f.secret, l: f.label })))};
+  const copyIndex = ${copyIndex};
+  const copyLabel = ${scriptJson(copyLabel)};
+  const pasteHint = ${scriptJson(pasteHint)};
+  const visible = {};
 
-  function togglePw() {
-    pwVisible = !pwVisible;
-    document.getElementById('pval').textContent = pwVisible ? pw : '••••••••';
-    document.getElementById('eyeBtn').innerHTML = pwVisible ? '&#128064;' : '&#128065;';
+  function toggle(i) {
+    visible[i] = !visible[i];
+    document.getElementById('v' + i).textContent = visible[i] ? fields[i].v : '••••••••';
+    document.getElementById('eye' + i).innerHTML = visible[i] ? '&#128064;' : '&#128065;';
   }
 
-  function copyField(which) {
-    navigator.clipboard.writeText(which === 'pw' ? pw : user);
+  async function writeClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+      ta.remove();
+      return ok;
+    }
   }
 
-  function copyPw() {
-    navigator.clipboard.writeText(pw).then(() => {
-      const btn = document.getElementById('mainBtn');
-      const hint = document.getElementById('hint');
-      btn.textContent = '✓  Copied!';
-      btn.classList.add('ok');
-      hint.textContent = 'Paste into the Windows Security dialog';
-      setTimeout(() => {
-        btn.innerHTML = '&#x2398;&nbsp; Copy Password';
-        btn.classList.remove('ok');
-        hint.textContent = 'Password auto-copied to clipboard';
-      }, 2000);
-    });
+  // Copying the main value (the password / token the user is here for) finishes the
+  // job, so the window closes itself. Copying a secondary field (e.g. the username)
+  // keeps it open so the main value can still be copied afterwards.
+  async function copyField(i) {
+    const hint = document.getElementById('hint');
+    const ok = await writeClipboard(fields[i].v);
+    if (!ok) {
+      hint.textContent = 'Copy failed - select the text and copy it manually';
+      return;
+    }
+    if (i !== copyIndex) {
+      hint.textContent = fields[i].l + ' copied';
+      return;
+    }
+    const btn = document.getElementById('mainBtn');
+    btn.textContent = '✓  Copied!';
+    btn.classList.add('ok');
+    hint.textContent = pasteHint;
+    setTimeout(() => window.close(), 450);
+  }
+
+  function copyMain() {
+    return copyField(copyIndex);
   }
 </script>
 </body>
 </html>`
 
-  helperWin = new BrowserWindow({
-    width: 300,
-    height: 230,
-    alwaysOnTop: true,
-    frame: false,
-    resizable: false,
-    skipTaskbar: false,
-    title: 'RDP Credentials',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true
-    }
-  })
+  const WIDTH = 300
+  const HEIGHT = 114 + fields.length * 58
+  // Top-right corner of the work area: centred, it sat on top of the login fields
+  // of the very app (NoMachine / the Windows Security dialog) it was meant to help.
+  const area = screen.getPrimaryDisplay().workArea
 
-  helperWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
-  helperWin.on('closed', () => { helperWin = null })
+  const MAX_ATTEMPTS = 3
+  const url = (() => {
+    try {
+      return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+    } catch (err) {
+      // The value is already on the clipboard, so the user can still paste it.
+      logHelperFailure(`${title}: could not be built: ${err instanceof Error ? err.message : String(err)}`)
+      return null
+    }
+  })()
+  if (!url) return
+
+  const open = (attempt: number): void => {
+    const win = new BrowserWindow({
+      width: WIDTH,
+      height: HEIGHT,
+      x: area.x + area.width - WIDTH - 16,
+      y: area.y + 16,
+      show: false,
+      backgroundColor: '#1e1b4b',
+      alwaysOnTop: true,
+      frame: false,
+      resizable: false,
+      skipTaskbar: false,
+      title,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        // The Chromium sandbox made this window's renderer crash intermittently
+        // (about 1 open in 15 on a Kaspersky machine, 0 in 60 without it), leaving a
+        // blank white window. The page is our own static HTML, with navigation locked
+        // below, so nothing untrusted is ever loaded into it. Same setting as the main window.
+        sandbox: false
+      }
+    })
+    helperWin = win
+
+    win.webContents.on('will-navigate', (e) => e.preventDefault())
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+
+    // Never show an empty window: reveal it only once it has painted, without
+    // stealing keyboard focus from the app the user is about to type into.
+    let ready = false
+    let failed = false
+    const watchdog = setTimeout(() => {
+      if (!ready) fail('did not paint within 8s')
+    }, 8000)
+    function fail(why: string): void {
+      if (failed) return
+      failed = true
+      clearTimeout(watchdog)
+      logHelperFailure(`${title}: ${why} (attempt ${attempt}/${MAX_ATTEMPTS})`)
+      const wasCurrent = helperWin === win
+      if (!win.isDestroyed()) win.destroy()
+      if (wasCurrent && attempt < MAX_ATTEMPTS) open(attempt + 1)
+    }
+    win.once('ready-to-show', () => {
+      ready = true
+      clearTimeout(watchdog)
+      if (!win.isDestroyed()) win.showInactive()
+    })
+    win.webContents.on('did-fail-load', (_e, code, desc) => fail(`load ${code} ${desc}`))
+    win.webContents.on('render-process-gone', (_e, details) => fail(`renderer ${details.reason}`))
+    win.on('closed', () => {
+      if (helperWin === win) helperWin = null
+    })
+
+    void win.loadURL(url).catch((err: Error) => fail(err.message))
+  }
+
+  try {
+    open(1)
+  } catch (err) {
+    logHelperFailure(`${title}: could not be opened: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+// Failures here are otherwise invisible in a packaged app, so keep a trace in the
+// app data folder (credential-helper.log) that can be read when a window is missing.
+function logHelperFailure(message: string): void {
+  console.error(`Credential helper failed: ${message}`)
+  try {
+    appendFileSync(
+      join(app.getPath('userData'), 'credential-helper.log'),
+      `${new Date().toISOString()} ${message}\n`,
+      'utf8'
+    )
+  } catch {
+    // logging must never break a connection
+  }
 }

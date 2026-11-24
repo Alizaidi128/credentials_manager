@@ -544,12 +544,26 @@ export function disconnectCheckpoint(tracPath: string): Promise<VpnConnectResult
 //   • TAP-Windows adapter driver (bundled with the installer)
 //   • App must run as Administrator (TAP interface creation requires it)
 
-let openConnectChild: ChildProcessWithoutNullStreams | null = null
-let openConnectBusy = false
+// One live OpenConnect process per gateway (host[:port]), so two FortiGate VPNs
+// can be up at the same time. Each gets its own Wintun adapter, named by OpenConnect
+// after the host.
+const openConnectSessions = new Map<string, ChildProcessWithoutNullStreams>()
+const openConnectConnecting = new Set<string>()
 const intentionalStops = new WeakSet<ChildProcessWithoutNullStreams>()
+
+type OtpPrompter = (prompt: string) => Promise<string>
 
 const OPENCONNECT_MAX_ATTEMPTS = 3
 const OPENCONNECT_ATTEMPT_TIMEOUT_MS = 90000
+const OTP_WAIT_MS = 180000
+const OTP_PROMPT_DEBOUNCE_MS = 400
+const OTP_LABEL_RE = /code|token|otp|one[- ]?time|passcode|verification|authenticator|\bpin\b|2fa|factor/i
+const CREDENTIAL_LABEL_RE = /\bpass(word)?\b|\buser(name)?\b|\blogin\b/i
+
+export function openConnectServerKey(host: string, port: string): string {
+  const h = host.trim()
+  return port?.trim() ? `${h}:${port.trim()}` : h
+}
 
 interface TunnelInfo {
   ip: string
@@ -624,7 +638,7 @@ function configureTunnel(
     emit(`Configuring VPN adapter (index ${ifIndex}): ${info.ip}, ${info.routes.length} routes, ${info.dns.length} DNS servers...`)
     let ps: ReturnType<typeof spawn>
     try {
-      ps = spawnPowerShellFile('vaultier-tunnel.ps1', buildTunnelScript(ifIndex, info), true)
+      ps = spawnPowerShellFile(`vaultier-tunnel-${ifIndex}.ps1`, buildTunnelScript(ifIndex, info), true)
     } catch (err) {
       emit(`Adapter setup failed to start: ${err instanceof Error ? err.message : String(err)}`)
       resolve(false)
@@ -674,7 +688,7 @@ function cleanupTunnel(ifIndex: number): void {
     `}`
   ].join('\n')
   try {
-    spawnPowerShellFile('vaultier-cleanup.ps1', script, false).on('error', () => undefined)
+    spawnPowerShellFile(`vaultier-cleanup-${ifIndex}.ps1`, script, false).on('error', () => undefined)
   } catch {
     // best effort — Windows removes the orphaned adapter on the next connect anyway
   }
@@ -713,6 +727,14 @@ function probeServerCertPin(
   })
 }
 
+// Strips the machine-readable tail FortiGate appends to its challenge message
+// ("...,reqid=1234,polid=1,...") and ignores HTTP chatter, so the OTP dialog shows
+// only the human-readable text the gateway sent.
+function cleanChallengeMessage(line: string): string {
+  if (/^(GET|POST|Got HTTP|HTTP|Content-|Date:|Connection:|Keep-Alive:|Transfer-|Set-Cookie)/i.test(line)) return ''
+  return line.replace(/,(reqid|polid|grpid|portal|peer|magic)=.*$/i, '').trim()
+}
+
 function runOpenConnectAttempt(
   openconnectPath: string,
   request: VpnConnectRequest,
@@ -720,7 +742,8 @@ function runOpenConnectAttempt(
   certArgs: string[],
   scriptPath: string,
   emit: (l: string) => void,
-  onDropped: DroppedSink
+  onDropped: DroppedSink,
+  onOtpRequired?: OtpPrompter
 ): Promise<AttemptResult> {
   return new Promise((resolve) => {
     const info: TunnelInfo = { ip: '', mtu: null, routes: [], dns: [] }
@@ -732,6 +755,10 @@ function runOpenConnectAttempt(
     let lastLine = ''
     let heartbeatNoted = false
     let lastWasHeartbeat = false
+    let otpPending = false
+    let otpUsed = false
+    let otpPromptCount = 0
+    let timeout: ReturnType<typeof setTimeout> | undefined
 
     const child = spawn(
       openconnectPath,
@@ -745,26 +772,33 @@ function runOpenConnectAttempt(
       ],
       { windowsHide: true }
     ) as ChildProcessWithoutNullStreams
-    openConnectChild = child
+    openConnectSessions.set(server, child)
 
     function settle(result: AttemptResult): void {
       if (settled) return
       settled = true
-      clearTimeout(timeout)
+      if (timeout) clearTimeout(timeout)
       resolve(result)
     }
 
     function stopChild(): void {
       intentionalStops.add(child)
-      if (openConnectChild === child) openConnectChild = null
+      if (openConnectSessions.get(server) === child) openConnectSessions.delete(server)
       child.kill()
     }
 
-    const timeout = setTimeout(() => {
-      if (settled) return
-      stopChild()
-      settle({ ok: false, message: 'Timed out waiting for OpenConnect to connect.', retryable: false })
-    }, OPENCONNECT_ATTEMPT_TIMEOUT_MS)
+    function armTimeout(ms: number): void {
+      if (timeout) clearTimeout(timeout)
+      timeout = setTimeout(() => {
+        if (settled) return
+        const message = otpPending
+          ? 'Timed out waiting for the one-time password.'
+          : 'Timed out waiting for OpenConnect to connect.'
+        stopChild()
+        settle({ ok: false, message, retryable: false })
+      }, ms)
+    }
+    armTimeout(OPENCONNECT_ATTEMPT_TIMEOUT_MS)
 
     function startConfigure(): void {
       if (configuring || ifIndex === null) return
@@ -783,6 +817,57 @@ function runOpenConnectAttempt(
         }
         connected = true
         settle({ ok: true, message: 'OpenConnect SSL VPN connected.', retryable: false })
+      })
+    }
+
+    // OpenConnect asks for a second factor by printing the gateway's message and
+    // then an unfinished line such as "Code: " (no newline), and waits on stdin.
+    function onPrompt(label: string): void {
+      if (settled || connected || otpPending) return
+      emit(label)
+
+      const isOtpLabel = OTP_LABEL_RE.test(label)
+      if (!isOtpLabel && CREDENTIAL_LABEL_RE.test(label)) {
+        // The gateway is asking for the username/password again, i.e. it refused them.
+        stopChild()
+        settle({
+          ok: false,
+          message: /invalid|incorrect|denied|fail/i.test(lastLine)
+            ? lastLine
+            : 'The gateway rejected the username or password.',
+          retryable: false
+        })
+        return
+      }
+      if (!onOtpRequired) {
+        stopChild()
+        settle({ ok: false, message: 'The VPN asked for a one-time password, which is not supported here.', retryable: false })
+        return
+      }
+
+      otpPending = true
+      armTimeout(OTP_WAIT_MS)
+      const prompt = [
+        otpPromptCount > 0 ? 'The previous code was not accepted.' : '',
+        cleanChallengeMessage(lastLine),
+        label
+      ].filter(Boolean).join(' ')
+
+      void onOtpRequired(prompt).then((otp) => {
+        otpPending = false
+        if (settled) return
+        const code = otp.trim()
+        if (!code) {
+          stopChild()
+          settle({ ok: false, message: 'One-time password entry was cancelled.', retryable: false })
+          return
+        }
+        otpUsed = true
+        otpPromptCount++
+        partials.forEach((p) => p.clear())
+        emit('One-time password submitted.')
+        child.stdin.write(`${code}\n`)
+        armTimeout(OPENCONNECT_ATTEMPT_TIMEOUT_MS)
       })
     }
 
@@ -829,17 +914,39 @@ function runOpenConnectAttempt(
       }
     }
 
+    const partials: { clear: () => void }[] = []
     function attach(stream: NodeJS.ReadableStream | null): void {
       let buf = ''
+      let promptTimer: ReturnType<typeof setTimeout> | null = null
+      const cancelPromptTimer = (): void => {
+        if (promptTimer) clearTimeout(promptTimer)
+        promptTimer = null
+      }
       stream?.on('data', (c: Buffer) => {
         buf += c.toString('utf8')
         const parts = buf.split(/\r?\n/)
         buf = parts.pop() ?? ''
         parts.forEach(onLine)
+        cancelPromptTimer()
+        if (buf && buf.length <= 160 && /[:?]\s*$/.test(buf)) {
+          // An unfinished line that stays unchanged is a prompt waiting for input.
+          const snapshot = buf
+          promptTimer = setTimeout(() => {
+            promptTimer = null
+            if (buf === snapshot) onPrompt(snapshot.trim())
+          }, OTP_PROMPT_DEBOUNCE_MS)
+        }
       })
       stream?.on('end', () => {
+        cancelPromptTimer()
         if (buf) onLine(buf)
         buf = ''
+      })
+      partials.push({
+        clear: () => {
+          cancelPromptTimer()
+          buf = ''
+        }
       })
     }
     attach(child.stdout)
@@ -853,7 +960,7 @@ function runOpenConnectAttempt(
     })
 
     child.on('exit', (code) => {
-      if (openConnectChild === child) openConnectChild = null
+      if (openConnectSessions.get(server) === child) openConnectSessions.delete(server)
       if (ifIndex !== null) cleanupTunnel(ifIndex)
       const intentional = intentionalStops.has(child)
       if (connected) {
@@ -868,7 +975,8 @@ function runOpenConnectAttempt(
       settle({
         ok: false,
         message: lastLine || `OpenConnect exited with code ${code}.`,
-        retryable: tunnelUp && !intentional
+        // A one-time password is single-use, so a silent retry would just be refused.
+        retryable: tunnelUp && !intentional && !otpUsed
       })
     })
   })
@@ -878,20 +986,20 @@ export async function connectOpenConnect(
   openconnectPath: string,
   request: VpnConnectRequest,
   onLog: LogSink,
-  onDropped: DroppedSink
+  onDropped: DroppedSink,
+  onOtpRequired?: OtpPrompter
 ): Promise<VpnConnectResult> {
-  if (openConnectChild || openConnectBusy) {
-    return { ok: false, message: 'An OpenConnect VPN session is already active.' }
+  const server = openConnectServerKey(request.host, request.port)
+  if (openConnectSessions.has(server) || openConnectConnecting.has(server)) {
+    return { ok: false, message: `An OpenConnect VPN session for ${server} is already active.` }
   }
-  openConnectBusy = true
+  openConnectConnecting.add(server)
 
   function emit(line: string): void {
     if (line.trim()) onLog({ requestId: request.requestId, line })
   }
 
   try {
-    const server = request.port?.trim() ? `${request.host}:${request.port.trim()}` : request.host
-
     let scriptPath: string
     try {
       scriptPath = ensureNoopScript()
@@ -913,25 +1021,33 @@ export async function connectOpenConnect(
         await new Promise((r) => setTimeout(r, 1500))
       }
       result = await runOpenConnectAttempt(
-        openconnectPath, request, server, certArgs, scriptPath, emit, onDropped
+        openconnectPath, request, server, certArgs, scriptPath, emit, onDropped, onOtpRequired
       )
       if (result.ok || !result.retryable) break
     }
     return { ok: result.ok, message: result.message }
   } finally {
-    openConnectBusy = false
+    openConnectConnecting.delete(server)
   }
 }
 
-export function disconnectOpenConnect(): Promise<VpnConnectResult> {
-  const child = openConnectChild
-  if (!child) {
-    return Promise.resolve({ ok: true, message: 'No active OpenConnect session.' })
+// With a server key, disconnects that gateway only; with none, every OpenConnect session.
+export function disconnectOpenConnect(server?: string): Promise<VpnConnectResult> {
+  const keys = server ? [server] : [...openConnectSessions.keys()]
+  let stopped = 0
+  for (const key of keys) {
+    const child = openConnectSessions.get(key)
+    if (!child) continue
+    intentionalStops.add(child)
+    openConnectSessions.delete(key)
+    child.kill()
+    stopped++
   }
-  intentionalStops.add(child)
-  openConnectChild = null
-  child.kill()
-  return Promise.resolve({ ok: true, message: 'OpenConnect SSL VPN disconnected.' })
+  return Promise.resolve(
+    stopped > 0
+      ? { ok: true, message: 'OpenConnect SSL VPN disconnected.' }
+      : { ok: true, message: 'No active OpenConnect session.' }
+  )
 }
 
 // Deliberately not automated: killing EasyConnect.exe (via taskkill) gets

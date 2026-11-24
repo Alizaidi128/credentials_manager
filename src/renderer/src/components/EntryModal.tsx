@@ -11,7 +11,7 @@ interface EntryModalProps {
 type FormState = Omit<CredentialEntry, 'id' | 'createdAt' | 'updatedAt'>
 
 function newApp(): AppEntry {
-  return { id: crypto.randomUUID(), name: '', url: '', username: '', password: '' }
+  return { id: crypto.randomUUID(), name: '', url: '', username: '', password: '', token: '' }
 }
 
 function newServer(): ServerEntry {
@@ -51,7 +51,7 @@ const VPN_TYPE_LABELS: Record<VpnType, string> = {
   sangfor: 'Sangfor (EasyConnect)',
   'forti-client': 'Fortinet FortiClient (IPSec)',
   checkpoint: 'Check Point Endpoint Security',
-  openconnect: 'FortiClient SSL-VPN (OpenConnect)'
+  openconnect: 'FortiClient SSL-VPN (OpenConnect, OTP supported)'
 }
 
 const VPN_HOST_PLACEHOLDERS: Record<VpnType, string> = {
@@ -66,13 +66,15 @@ const VPN_HOST_PLACEHOLDERS: Record<VpnType, string> = {
 const SERVER_TYPE_LABELS: Record<ServerType, string> = {
   none: 'No server connection',
   winscp: 'Linux / SFTP (WinSCP)',
-  rdp: 'Windows (Remote Desktop)'
+  rdp: 'Windows (Remote Desktop)',
+  nomachine: 'Linux / Kubernetes (NoMachine)'
 }
 
 const SERVER_DEFAULT_PORT: Record<ServerType, string> = {
   none: '',
   winscp: '22',
-  rdp: '3389'
+  rdp: '3389',
+  nomachine: '22'
 }
 
 const DB_CLIENT_LABELS: Record<DbClientType, string> = {
@@ -353,6 +355,20 @@ export function EntryModal({ initial, onCancel, onSave }: EntryModalProps): JSX.
                         onToggleReveal={(k) => setRevealed((p) => ({ ...p, [k]: !p[k] }))}
                       />
                     </div>
+                    <div className="sm:col-span-2">
+                      <label className={labelClass()}>Token (optional)</label>
+                      <SecretInput
+                        fieldKey={`appToken-${app.id}`}
+                        value={app.token ?? ''}
+                        onChange={(v) => updateApp('token', v)}
+                        placeholder="Bearer token, e.g. for the Kubernetes Dashboard"
+                        revealed={revealed}
+                        onToggleReveal={(k) => setRevealed((p) => ({ ...p, [k]: !p[k] }))}
+                      />
+                      <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                        When set, Launch opens the URL and shows a small window to copy the token from.
+                      </p>
+                    </div>
                   </div>
                 </div>
               )
@@ -398,8 +414,13 @@ export function EntryModal({ initial, onCancel, onSave }: EntryModalProps): JSX.
                         const t = e.target.value as Exclude<ServerType, 'none'>
                         update('servers', form.servers.map((s, i) => i === idx ? { ...s, type: t, port: s.port || SERVER_DEFAULT_PORT[t] } : s))
                       }} className={inputClass()}>
-                        <option value="rdp">Windows (Remote Desktop)</option>
-                        <option value="winscp">Linux / SFTP (WinSCP)</option>
+                        {(Object.keys(SERVER_TYPE_LABELS) as ServerType[])
+                          .filter((type): type is Exclude<ServerType, 'none'> => type !== 'none')
+                          .map((type) => (
+                            <option key={type} value={type}>
+                              {SERVER_TYPE_LABELS[type]}
+                            </option>
+                          ))}
                       </select>
                     </div>
                     <div>
@@ -424,6 +445,11 @@ export function EntryModal({ initial, onCancel, onSave }: EntryModalProps): JSX.
                         onToggleReveal={(k) => setRevealed((p) => ({ ...p, [k]: !p[k] }))}
                       />
                     </div>
+                    {srv.type === 'nomachine' && (
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500 sm:col-span-2">
+                        Opens NoMachine and logs in automatically with this username and password (passwords with non-ASCII characters fall back to a copy-paste window). Use port 22 for NoMachine over SSH, or 4000 for the NX protocol.
+                      </p>
+                    )}
                     {srv.type === 'winscp' && (
                       <div className="sm:col-span-2">
                         <label className={labelClass()}>SFTP Server (optional)</label>

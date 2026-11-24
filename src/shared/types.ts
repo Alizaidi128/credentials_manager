@@ -1,6 +1,6 @@
 export type VpnType = 'none' | 'cisco-anyconnect' | 'sangfor' | 'forti-client' | 'checkpoint' | 'openconnect'
 
-export type ServerType = 'none' | 'winscp' | 'rdp'
+export type ServerType = 'none' | 'winscp' | 'rdp' | 'nomachine'
 
 export interface ServerEntry {
   id: string
@@ -29,6 +29,8 @@ export interface AppEntry {
   url: string
   username: string
   password: string
+  /** Optional bearer token (e.g. Kubernetes Dashboard); shown in a copy window on Launch. */
+  token?: string
 }
 
 export interface CredentialEntry {
@@ -69,6 +71,12 @@ export interface CredentialEntry {
   updatedAt: number
 }
 
+export interface AppLaunchRequest {
+  name: string
+  url: string
+  token: string
+}
+
 export interface UnlockResult {
   ok: boolean
   entries?: CredentialEntry[]
@@ -90,6 +98,7 @@ export interface AppSettings {
   // Per-user email — OTP and recovery key emails are sent here
   userEmail: string
   winscpPath: string
+  nomachinePath: string
   openconnectPath: string
   // 0 = unlimited (never lock on idle)
   idleTimeoutMinutes: number

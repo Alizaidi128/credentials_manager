@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  AppLaunchRequest,
   AppSettings,
   CredentialEntry,
   DbLaunchRequest,
@@ -36,8 +37,8 @@ const api = {
 
   connectVpn: (request: VpnConnectRequest): Promise<VpnConnectResult> =>
     ipcRenderer.invoke('vpn:connect', request),
-  disconnectVpn: (vpnType: VpnType): Promise<VpnConnectResult> =>
-    ipcRenderer.invoke('vpn:disconnect', vpnType),
+  disconnectVpn: (vpnType: VpnType, target?: { host: string; port: string }): Promise<VpnConnectResult> =>
+    ipcRenderer.invoke('vpn:disconnect', vpnType, target),
   onVpnLog: (callback: (event: VpnLogEvent) => void): (() => void) => {
     const listener = (_event: unknown, data: VpnLogEvent): void => callback(data)
     ipcRenderer.on('vpn:log', listener)
@@ -64,6 +65,7 @@ const api = {
   hasPendingOtp: (): Promise<boolean> => ipcRenderer.invoke('otp:hasPending'),
 
   openUrl: (url: string): Promise<void> => ipcRenderer.invoke('shell:openUrl', url),
+  launchApp: (request: AppLaunchRequest): Promise<void> => ipcRenderer.invoke('app:launch', request),
   launchDb: (request: DbLaunchRequest): Promise<DbLaunchResult> =>
     ipcRenderer.invoke('db:launch', request),
   launchServer: (request: ServerLaunchRequest): Promise<ServerLaunchResult> =>

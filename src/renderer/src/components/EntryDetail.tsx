@@ -15,6 +15,25 @@ interface EntryDetailProps {
 
 type ActionStatus = { kind: 'success' | 'error'; message: string } | null
 
+const VPN_REQUIRED_MESSAGE = 'Connect the VPN first — this entry needs it before anything can be launched.'
+const dimWhenBlocked = (blocked: boolean): string => (blocked ? 'opacity-60' : '')
+
+function appButtonLabel(app: AppEntry): string {
+  const name = app.name.trim()
+  if (name) return name
+  try {
+    return new URL(app.url).host || 'Launch app'
+  } catch {
+    return 'Launch app'
+  }
+}
+
+const SERVER_TYPE_SHORT: Record<ServerEntry['type'], string> = {
+  rdp: 'RDP',
+  winscp: 'WinSCP',
+  nomachine: 'NoMachine'
+}
+
 export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, onVpnConnect, onVpnDisconnect }: EntryDetailProps): JSX.Element {
   const [launchingApp, setLaunchingApp] = useState(false)
   const [launchingDb, setLaunchingDb] = useState(false)
@@ -27,6 +46,8 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
   const [otpRequest, setOtpRequest] = useState<VpnOtpRequest | null>(null)
   const [otpValue, setOtpValue] = useState('')
   const requestIdRef = useRef<string | null>(null)
+  // An entry with a VPN configured can't launch anything until that VPN is connected.
+  const vpnBlocked = entry.vpnType !== 'none' && !vpnConnected
 
   useEffect(() => {
     setAppStatus(null)
@@ -66,8 +87,24 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
   }
 
   async function openApp(app: AppEntry): Promise<void> {
-    if (app.url.trim()) {
-      await window.api.openUrl(app.url)
+    if (!app.url.trim()) return
+    setAppStatus(null)
+    if (vpnBlocked) {
+      setAppStatus({ kind: 'error', message: VPN_REQUIRED_MESSAGE })
+      return
+    }
+    try {
+      if (!app.token?.trim()) {
+        await window.api.openUrl(app.url)
+      } else if (typeof window.api.launchApp === 'function') {
+        await window.api.launchApp({ name: app.name, url: app.url, token: app.token })
+      } else {
+        // The running app is older than this screen (e.g. dev server not restarted).
+        await window.api.openUrl(app.url)
+        setAppStatus({ kind: 'error', message: 'Opened the URL, but the token window needs a restart of Vaultier.' })
+      }
+    } catch (err) {
+      setAppStatus({ kind: 'error', message: `Could not launch: ${err instanceof Error ? err.message : String(err)}` })
     }
   }
 
@@ -93,6 +130,7 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
       password: entry.vpnPassword
     })
     setLaunchingApp(false)
+    setOtpRequest(null)
     if (!result.ok) {
       setAppStatus({ kind: 'error', message: result.message })
       return
@@ -103,13 +141,20 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
 
   async function handleDisconnectVpn(): Promise<void> {
     setAppStatus(null)
-    const result = await window.api.disconnectVpn(entry.vpnType)
+    const result = await window.api.disconnectVpn(entry.vpnType, {
+      host: entry.vpnHost,
+      port: entry.vpnPort ?? ''
+    })
     setAppStatus({ kind: result.ok ? 'success' : 'error', message: result.message })
     onVpnDisconnect()
   }
 
   async function handleLaunchDb(): Promise<void> {
     setDbStatus(null)
+    if (vpnBlocked) {
+      setDbStatus({ kind: 'error', message: VPN_REQUIRED_MESSAGE })
+      return
+    }
     if (!entry.dbCommandTemplate.trim()) {
       setDbStatus({ kind: 'error', message: 'No launch command configured for this entry.' })
       return
@@ -135,8 +180,8 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
   async function handleConnectServer(srv: ServerEntry): Promise<void> {
     setServerStatus(null)
 
-    if (entry.vpnType !== 'none' && !vpnConnected) {
-      setServerStatus({ kind: 'error', message: 'Connect VPN first before connecting to the server.' })
+    if (vpnBlocked) {
+      setServerStatus({ kind: 'error', message: VPN_REQUIRED_MESSAGE })
       return
     }
 
@@ -174,7 +219,7 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
               value={otpValue}
               onChange={(e) => setOtpValue(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleOtpSubmit()}
-              placeholder="Enter OTP from your email"
+              placeholder="Enter the one-time password"
               className="mb-4 w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-slate-900 outline-none ring-brand-500/40 transition focus:ring-2 dark:border-border-dark dark:bg-panel-dark dark:text-white"
             />
             <div className="flex justify-end gap-2">
@@ -264,11 +309,27 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
                 </button>
               )}
 
+              {entry.apps
+                .filter((app) => app.url.trim())
+                .map((app) => (
+                  <button
+                    key={app.id}
+                    type="button"
+                    onClick={() => void openApp(app)}
+                    title={vpnBlocked ? 'Connect the VPN first' : undefined}
+                    className={`flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:border-brand-400 hover:text-brand-600 dark:border-border-dark dark:text-slate-300 dark:hover:text-brand-400 ${dimWhenBlocked(vpnBlocked)}`}
+                  >
+                    <GlobeIcon className="h-4 w-4" />
+                    {appButtonLabel(app)}
+                  </button>
+                ))}
+
               <button
                 type="button"
                 onClick={handleLaunchDb}
                 disabled={launchingDb}
-                className="flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:border-brand-400 hover:text-brand-600 dark:border-border-dark dark:text-slate-300 dark:hover:text-brand-400 disabled:pointer-events-none disabled:opacity-60"
+                title={vpnBlocked ? 'Connect the VPN first' : undefined}
+                className={`flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:border-brand-400 hover:text-brand-600 dark:border-border-dark dark:text-slate-300 dark:hover:text-brand-400 disabled:pointer-events-none disabled:opacity-60 ${dimWhenBlocked(vpnBlocked)}`}
               >
                 <DatabaseIcon className="h-4 w-4" />
                 {launchingDb ? 'Launching…' : 'Connect Database'}
@@ -280,10 +341,11 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
                   type="button"
                   onClick={() => void handleConnectServer(srv)}
                   disabled={launchingServerId === srv.id}
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:border-brand-400 hover:text-brand-600 dark:border-border-dark dark:text-slate-300 dark:hover:text-brand-400 disabled:pointer-events-none disabled:opacity-60"
+                  title={vpnBlocked ? 'Connect the VPN first' : undefined}
+                  className={`flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-slate-600 transition hover:border-brand-400 hover:text-brand-600 dark:border-border-dark dark:text-slate-300 dark:hover:text-brand-400 disabled:pointer-events-none disabled:opacity-60 ${dimWhenBlocked(vpnBlocked)}`}
                 >
                   <ServerIcon className="h-4 w-4" />
-                  {launchingServerId === srv.id ? 'Connecting…' : (srv.name.trim() || (srv.type === 'winscp' ? 'Connect WinSCP' : 'Connect RDP'))}
+                  {launchingServerId === srv.id ? 'Connecting…' : (srv.name.trim() || `Connect ${SERVER_TYPE_SHORT[srv.type]}`)}
                 </button>
               ))}
             </div>
@@ -352,7 +414,8 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
                         <button
                           type="button"
                           onClick={() => openApp(app)}
-                          className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-brand-400 hover:text-brand-600 dark:border-border-dark dark:text-slate-300 dark:hover:text-brand-400"
+                          title={vpnBlocked ? 'Connect the VPN first' : undefined}
+                          className={`flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-brand-400 hover:text-brand-600 dark:border-border-dark dark:text-slate-300 dark:hover:text-brand-400 ${dimWhenBlocked(vpnBlocked)}`}
                         >
                           <GlobeIcon className="h-3.5 w-3.5" />
                           Launch
@@ -363,8 +426,17 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
                       <div className="sm:col-span-2">
                         <CopyField label="URL" value={app.url} monospace />
                       </div>
-                      <CopyField label="Username" value={app.username} monospace />
-                      <CopyField label="Password" value={app.password} secret monospace />
+                      {(app.username.trim() || app.password.trim() || !app.token?.trim()) && (
+                        <>
+                          <CopyField label="Username" value={app.username} monospace />
+                          <CopyField label="Password" value={app.password} secret monospace />
+                        </>
+                      )}
+                      {app.token?.trim() && (
+                        <div className="sm:col-span-2">
+                          <CopyField label="Token" value={app.token} secret monospace />
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -385,7 +457,7 @@ export function EntryDetail({ entry, onEdit, onDelete, vpnConnected, vpnNotice, 
                         {srv.name || `Server ${idx + 1}`}
                       </span>
                       <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                        {srv.type === 'winscp' ? 'WinSCP' : 'RDP'}
+                        {SERVER_TYPE_SHORT[srv.type]}
                       </span>
                     </div>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

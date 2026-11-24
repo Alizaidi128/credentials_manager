@@ -10,7 +10,8 @@ import * as dbLaunch from './dbLaunch'
 import * as serverLaunch from './serverLaunch'
 import * as otp from './otp'
 import * as exportVault from './export'
-import type { AppSettings, CredentialEntry, DbLaunchRequest, ServerLaunchRequest, VpnConnectRequest, VpnType, VpnOtpRequest } from '../shared/types'
+import { showCredentialHelper } from './rdpHelper'
+import type { AppLaunchRequest, AppSettings, CredentialEntry, DbLaunchRequest, ServerLaunchRequest, VpnConnectRequest, VpnType, VpnOtpRequest } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -240,11 +241,27 @@ function registerIpcHandlers(): void {
     await settings.saveSettings(next)
   })
 
+  // Asks the renderer for a one-time password and resolves with what was entered
+  // ('' means the user cancelled). Only a reply carrying this request's id counts.
+  function promptVpnOtp(requestId: string, prompt: string): Promise<string> {
+    return new Promise((resolve) => {
+      const handler = (_ev: unknown, msg: { requestId: string; otp: string }): void => {
+        if (msg.requestId !== requestId) return
+        ipcMain.removeListener('vpn:otp-submit', handler)
+        resolve(msg.otp)
+      }
+      ipcMain.on('vpn:otp-submit', handler)
+      const otpReq: VpnOtpRequest = { requestId, prompt }
+      mainWindow?.webContents.send('vpn:otp-required', otpReq)
+    })
+  }
+
   ipcMain.handle('vpn:connect', async (_event, request: VpnConnectRequest) => {
     const appSettings = await settings.getSettings()
     const onLog = (logEvent: { requestId: string; line: string }): void => {
       mainWindow?.webContents.send('vpn:log', logEvent)
     }
+    const onOtpRequired = (prompt: string): Promise<string> => promptVpnOtp(request.requestId, prompt)
     switch (request.vpnType) {
       case 'cisco-anyconnect':
         return vpn.connectCiscoAnyConnect(appSettings.vpnCliPath, request, onLog)
@@ -252,29 +269,24 @@ function registerIpcHandlers(): void {
         return vpn.connectSangfor(appSettings.sangforClientPath, request, onLog, appSettings.sangforSettleMs)
       case 'forti-client':
         return vpn.connectFortiClient(appSettings.fortiClientPath, request, onLog)
-      case 'checkpoint': {
-        const onOtpRequired = (prompt: string): Promise<string> => {
-          return new Promise((resolveOtp, rejectOtp) => {
-            const otpReq: VpnOtpRequest = { requestId: request.requestId, prompt }
-            mainWindow?.webContents.send('vpn:otp-required', otpReq)
-            ipcMain.once('vpn:otp-submit', (_ev, { requestId, otp }: { requestId: string; otp: string }) => {
-              if (requestId === request.requestId) resolveOtp(otp)
-              else rejectOtp(new Error('OTP response for wrong request'))
-            })
-          })
-        }
+      case 'checkpoint':
         return vpn.connectCheckpoint(appSettings.checkpointPath, request, onLog, onOtpRequired)
-      }
       case 'openconnect':
-        return vpn.connectOpenConnect(appSettings.openconnectPath, request, onLog, (dropped) => {
-          mainWindow?.webContents.send('vpn:dropped', dropped)
-        })
+        return vpn.connectOpenConnect(
+          appSettings.openconnectPath,
+          request,
+          onLog,
+          (dropped) => {
+            mainWindow?.webContents.send('vpn:dropped', dropped)
+          },
+          onOtpRequired
+        )
       default:
         return { ok: false, message: `Unsupported VPN type: ${request.vpnType}` }
     }
   })
 
-  ipcMain.handle('vpn:disconnect', async (_event, vpnType: VpnType) => {
+  ipcMain.handle('vpn:disconnect', async (_event, vpnType: VpnType, target?: { host: string; port: string }) => {
     const appSettings = await settings.getSettings()
     switch (vpnType) {
       case 'cisco-anyconnect':
@@ -286,7 +298,7 @@ function registerIpcHandlers(): void {
       case 'checkpoint':
         return vpn.disconnectCheckpoint(appSettings.checkpointPath)
       case 'openconnect':
-        return vpn.disconnectOpenConnect()
+        return vpn.disconnectOpenConnect(target ? vpn.openConnectServerKey(target.host, target.port) : undefined)
       default:
         return { ok: false, message: `Unsupported VPN type: ${vpnType}` }
     }
@@ -298,13 +310,34 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('server:launch', async (_event, request: ServerLaunchRequest) => {
     const appSettings = await settings.getSettings()
-    return serverLaunch.launchServer(appSettings.winscpPath, request)
+    return serverLaunch.launchServer(
+      { winscpPath: appSettings.winscpPath, nomachinePath: appSettings.nomachinePath },
+      request
+    )
   })
 
   ipcMain.handle('app:version', () => app.getVersion())
 
   ipcMain.handle('shell:openUrl', async (_event, url: string) => {
     await shell.openExternal(url)
+  })
+
+  // Opens the app's URL in the default browser and, so the token can be pasted into
+  // the page, shows a small always-on-top window with it (also put on the clipboard).
+  ipcMain.handle('app:launch', async (_event, request: AppLaunchRequest) => {
+    // Open the page first so a problem with the token window can never block it.
+    await shell.openExternal(request.url)
+    try {
+      showCredentialHelper({
+        title: `${(request.name ?? '').trim() || 'Application'} token`,
+        subtitle: request.url,
+        fields: [{ label: 'Token', value: request.token, secret: true }],
+        copyIndex: 0,
+        pasteHint: 'Paste into the token field'
+      })
+    } catch (err) {
+      console.error('Token window failed:', err)
+    }
   })
 
 
@@ -372,6 +405,7 @@ app.on('second-instance', () => {
 })
 
 app.whenReady().then(() => {
+  serverLaunch.sweepNoMachineSessions()
   registerIpcHandlers()
   createWindow()
 
@@ -421,6 +455,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   isQuitting = true
   void vpn.disconnectOpenConnect()
+  serverLaunch.sweepNoMachineSessions()
 })
 
 app.on('window-all-closed', () => {
